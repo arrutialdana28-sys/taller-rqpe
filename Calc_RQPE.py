@@ -43,7 +43,8 @@ def RQPE_simple_doble(file_qc, path_output_qpe, radar, overwrite=False):
     if (os.path.exists(file_out)) and not overwrite:
         return file_out"""
 
-    nombre = file_qc.stem[:-3]#file_qc.stem.split('_')
+   # nombre = file_qc.stem[:-3]#file_qc.stem.split('_')
+    nombre = Path(file_qc).stem[:-3]
     nombre_radar = radar#nombre[5] #nombre[0] # esto es cuando es operativo..
 
     file = Path(f'{path_output_qpe}/{nombre_radar}/{nombre}_qpe.nc')
