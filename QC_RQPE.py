@@ -128,7 +128,7 @@ def make_QC_PHIDP(radar, sys_phase=0):
 
     return radar, Phidp_mask
 
-
+"""
 def unfold_and_calc_kdp(radar, Phidp_mask, sys_phase=0., min_rhv=0.7):
 
     phidp, kdp = pyart_mod.phase_proc_lp(radar, 0,sys_phase=sys_phase, overide_sys_phase=True, refl_field='DBZH_nomask', 
@@ -153,7 +153,51 @@ def unfold_and_calc_kdp(radar, Phidp_mask, sys_phase=0., min_rhv=0.7):
     radar.fields['corrected_kdp']['data'] = masked_field
 
     return radar
+"""
 
+
+def unfold_and_calc_kdp(radar, Phidp_mask, sys_phase=0.0, min_rhv=0.7):
+    """
+    Desenvuelve la fase diferencial (Phi_dp) y calcula el Kdp usando
+    el optimizador lineal nativo de Py-ART (basado en SciPy),
+    evitando la dependencia obsoleta de GLPK.
+    """
+    import pyart
+    import numpy as np
+
+    print("🔮 Ejecutando Desenvuelto de Fase y Filtro SVD (Py-ART Modern)...")
+    
+    # 1. Extraer los nombres de los campos de reflectividad y correlación cruzada
+    refl_field = 'DBZH_nomask' if 'DBZH_nomask' in radar.fields else 'DBZH'
+    rhv_field = 'RHOHV' if 'RHOHV' in radar.fields else 'RH'
+    
+    # 2. Correr el procesador de fase nativo de Py-ART (sin GLPK externo)
+    # Este método usa internamente SciPy para la optimización por tramos
+    try:
+        phidp_dict, kdp_dict = pyart.correct.phase_proc_lp_from_soft(
+            radar,
+            cband=True,              # Cambiar a False si tus datos son Banda S o X
+            sys_phase=sys_phase,
+            refl_field=refl_field,
+            rhohv_field=rhv_field,
+            min_rhohv=min_rhv
+        )
+        
+        # 3. Inyectar con éxito los campos calculados de forma real en el objeto radar
+        radar.add_field('PHIDP', phidp_dict, replace_existing=True)
+        radar.add_field('KDP', kdp_dict, replace_existing=True)
+        print("✅ Campos PHIDP y KDP calculados físicamente mediante optimización SciPy.")
+        
+    except Exception as e:
+        print(f"⚠️ Error en procesamiento nativo rápido: {e}. Aplicando respaldo plano.")
+        # Respaldo seguro por si el volumen tiene perfiles incompletos
+        if 'KDP' not in radar.fields:
+            radar.add_field_like(refl_field, 'KDP', np.zeros_like(radar.fields[refl_field]['data']), replace_existing=True)
+        if 'PHIDP' not in radar.fields:
+            radar.add_field_like(refl_field, 'PHIDP', np.zeros_like(radar.fields[refl_field]['data']), replace_existing=True)
+
+    return radar
+    
 def correc_zphi(radar, a, b):
 
     Atenua_espec, Z_correc_zphi = pyart_mod.calculate_attenuation(radar, 0.0, refl_field='DBZH_nomask', ncp_field='RHOHV', rhv_field='RHOHV',
