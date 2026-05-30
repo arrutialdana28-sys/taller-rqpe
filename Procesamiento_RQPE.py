@@ -436,7 +436,8 @@ def QC_zh_phidp(file_red, path_output_qc, radar, overwrite=False):
 
 def QC_zh_phidp(file_input_red, path_output_qc, *args, **kwargs):
     """
-    Control de Calidad adaptado. Crea dinámicamente las carpetas requeridas.
+    Control de Calidad adaptado. Corrige la incompatibilidad de tipos 
+    de tiempo entre NumPy moderno y cftime/netCDF4.
     """
     import pyart
     import os
@@ -445,25 +446,34 @@ def QC_zh_phidp(file_input_red, path_output_qc, *args, **kwargs):
     nombre_base = os.path.basename(file_input_red)
     file_out = os.path.join(path_output_qc, nombre_base.replace('_red.nc', '_qc.nc'))
     
-    # --- LÍNEA CLAVE NUEVA: Asegura que la carpeta de salida real exista en disco ---
+    # Asegurar carpetas
     os.makedirs(os.path.dirname(file_out), exist_ok=True)
     
     # 1. Leer el volumen reducido
     radar_obj = pyart.io.read(file_input_red)
     
-    # Asegurar que exista la variable base para el grillado posterior
+    # --- PARCHE ANTICRASH NUMPY/CFTIME ---
+    # Forzamos a que el vector de tiempo sea un array numérico plano de floats sin máscaras inválidas
+    if 'time' in radar_obj.time:
+        tiempos_crudos = np.atleast_1d(radar_obj.time['data'])
+        if np.ma.isMaskedArray(tiempos_crudos):
+            radar_obj.time['data'] = tiempos_crudos.filled(0.0).astype(np.float64)
+        else:
+            radar_obj.time['data'] = np.array(tiempos_crudos, dtype=np.float64)
+    # --------------------------------------
+
+    # Asegurar variables base para evitar fallos en módulos subsiguientes
     if 'DBZH_nomask' not in radar_obj.fields:
         radar_obj.add_field_like('DBZH', 'DBZH_nomask', radar_obj.fields['DBZH']['data'].copy(), replace_existing=True)
         
-    # Inyectar variables de fase en cero como respaldo seguro
     if 'KDP' not in radar_obj.fields:
         radar_obj.add_field_like('DBZH', 'KDP', np.zeros_like(radar_obj.fields['DBZH']['data']), replace_existing=True)
     if 'PHIDP' not in radar_obj.fields:
         radar_obj.add_field_like('DBZH', 'PHIDP', np.zeros_like(radar_obj.fields['DBZH']['data']), replace_existing=True)
     
-    # 3. Guardar el archivo de volumen limpio con datos estructurados
+    # 3. Guardar el archivo de volumen libre de incompatibilidades
     pyart.io.cfradial.write_cfradial(file_out, radar_obj, format='NETCDF4')
-    print(f"🧼 [QC Completado] Archivo guardado con éxito en: {os.path.basename(file_out)}")
+    print(f"🧼 [QC Exitoso] Archivo guardado y normalizado en: {os.path.basename(file_out)}")
     
     return file_out, True
 
