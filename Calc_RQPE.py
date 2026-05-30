@@ -278,8 +278,9 @@ def crear_netcdf_acum(files, path_output, date_file_ini, date_file_fin,
     print('Acumulando y guardando netcdf...')
 
     if not os.path.exists(path_output):
-        os.system('mkdir '+ path_output)
-
+       # os.system('mkdir '+ path_output)
+       os.makedirs(str(path_output), exist_ok=True)
+        
     date_ini = dt.datetime.strptime(date_file_ini, '%Y%m%d_%H%M')
     date_fin = dt.datetime.strptime(date_file_fin, '%Y%m%d_%H%M')
 
