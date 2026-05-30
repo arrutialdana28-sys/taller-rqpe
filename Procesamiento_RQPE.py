@@ -434,10 +434,15 @@ def QC_zh_phidp(file_red, path_output_qc, radar, overwrite=False):
     return file, True
 """
 
-def QC_zh_phidp(file_input_red, path_output_qc, radar, path_statics, flag_clutter=True, DBZ_clutter=5.0, **kwargs):
+def QC_zh_phidp(file_input_red, path_output_qc, *args, **kwargs):
+    """
+    Control de Calidad adaptado. Absorbe cualquier combinación de argumentos
+    (como path_statics o variables de clutter) de forma flexible.
+    """
     import pyart
     import os
-    import QC_RQPE  
+    import numpy as np
+    import QC_RQPE as qc  # Asegúrate de importar tu módulo de QC moderno
     
     nombre_base = os.path.basename(file_input_red)
     file_out = os.path.join(path_output_qc, nombre_base.replace('_red.nc', '_qc.nc'))
@@ -449,13 +454,12 @@ def QC_zh_phidp(file_input_red, path_output_qc, radar, path_statics, flag_clutte
     if 'DBZH_nomask' not in radar_obj.fields:
         radar_obj.add_field_like('DBZH', 'DBZH_nomask', radar_obj.fields['DBZH']['data'].copy(), replace_existing=True)
     
-    # 2. CALCULO REAL: Desenvuelto y Kdp con el método de SciPy moderno
-    # Usamos None en Phidp_mask para que use la configuración por defecto de Py-ART
+    # 2. CÁLCULO REAL: Desenvuelto y Kdp moderno basado en SciPy
     radar_obj = qc.unfold_and_calc_kdp(radar_obj, Phidp_mask=None, sys_phase=0.0, min_rhv=0.7)
     
     # 3. Guardar el archivo de volumen limpio con datos físicos reales
     pyart.io.cfradial.write_cfradial(file_out, radar_obj, format='NETCDF4')
-    print(f"🧼 [QC Científico Completo] Archivo guardado con Kdp y Phidp reales en: {os.path.basename(file_out)}")
+    print(f"🧼 [QC Científico Completo] Archivo guardado exitosamente en: {os.path.basename(file_out)}")
     
     return file_out, True
 
