@@ -90,58 +90,56 @@ def RQPE_simple_doble(file_qc, path_output_qpe, *args, **kwargs):
     
     # --- RETORNO COORDINADO CON RQPE_MAIN ---
     return file_out, True
+
 def Grid_RQPE(file_qpe, path_output_grid, *args, **kwargs):
     """
-    Grilla los datos de QPE (rain_rate) a una malla cartesiana regular de Py-ART.
-    
-    BLINDAJE TOTAL:
-    - Convierte file_qpe a Path para evitar fallos de AttributeError (.stem).
-    - Soporta argumentos flexibles (*args, **kwargs) para evitar caídas por firmas.
-    - Extrae la resolución espacial dinámicamente desde los parámetros del main.
+    Grilla los datos de QPE a una malla cartesiana regular sin destruir datos.
+    - Amplía el rango vertical (Z) para asegurar que capture la lluvia del volumen.
+    - Limpia las máscaras de Py-ART convirtiéndolas a ceros físicos manejables.
     """
     import pyart
     import os
     import numpy as np
     from pathlib import Path
     
-    # 1. Forzar objeto Path para extraer el nombre de forma 100% segura
     file_qpe_path = Path(file_qpe)
     nombre = file_qpe_path.stem[:-4] if file_qpe_path.stem.endswith('_qpe') else file_qpe_path.stem
     
     file_out = os.path.join(path_output_grid, nombre + '_grid.nc')
     os.makedirs(os.path.dirname(file_out), exist_ok=True)
     
-    # 2. LECTURA OPERATIVA: Abrimos el radar que ya viene con la lluvia calculada
     radar = pyart.io.read(str(file_qpe_path))
     print(f"🗺️ [Grillado Cartesiano] Interpolando volumen a malla regular para {nombre}")
     
-    # 3. EXTRAER PARÁMETROS DINÁMICOS (Resguardo si no vienen en kwargs)
-    # Si el panel de control pide 2.0 km, lo pasamos a metros (2000 m)
+    # Rellenar máscaras en el objeto radar antes de grillar para evitar que Barnes extienda el NaN
+    if 'rain_rate' in radar.fields:
+        data_raw = radar.fields['rain_rate']['data']
+        if np.ma.isMaskedArray(data_raw):
+            radar.fields['rain_rate']['data'] = data_raw.filled(0.0)
+            
     res_km = kwargs.get('res', 2.0)
-    grid_shape = (1, int(300 / res_km), int(300 / res_km)) # Grilla estándar de 300x300 km
+    grid_shape = (1, int(300 / res_km), int(300 / res_km)) 
     
-    # 4. EJECUCIÓN DEL GRILLADO DE PY-ART
     try:
-        # Interpolación por distancia inversa ponderada a altura fija (CAPPI)
+        # Ampliamos los límites de Z (de 1km a 4km) para que interpole con datos reales del volumen
         grid = pyart.map.grid_from_radars(
             (radar,),
             grid_shape=grid_shape,
-            grid_limits=((2000, 2000), (-150000, 150000), (-150000, 150000)), # 2km de altura, 150km de radio
+            grid_limits=((1000, 4000), (-150000, 150000), (-150000, 150000)),
             fields=['rain_rate'],
             gridding_algo='map_to_grid',
-            weighting_function='Barnes'
+            weighting_function='Barnes',
+            roi_func='dist_beam' # Usa el ancho del haz del radar para ponderar, mucho más físico
         )
         
-        # 5. GUARDADO EN DISCO DE LA GRILLA NETCDF
+        # Guardar grilla
         grid.write(file_out, format='NETCDF4')
         print(f"📦 Grilla cartesiana guardada exitosamente en: {os.path.basename(file_out)}")
         
     except Exception as e:
-        print(f"⚠️ Error en el algoritmo de grillado nativo: {e}")
-        # Retorno controlado para que el pipeline intente continuar con la advección
+        print(f"⚠️ Error en el algoritmo de grillado: {e}")
         return file_out, False
     
-    # --- RETORNO COORDINADO CON EL SCRIPT PRINCIPAL ---
     return file_out, True
 
 def advection_correction(R, T=5, t=1):
@@ -273,107 +271,79 @@ def remove_corners(Acum, lat, lon, radar_lat, radar_lon):
 
 def crear_netcdf_acum(files_grid, path_output_acum, date_file_ini, *args, **kwargs):
     """
-    Acumula las grillas cartesianas resolviendo el vector de movimiento 
-    por flujo óptico (PySteps) y genera el NetCDF final de acumulación continua.
-    
-    BLINDAJE TOTAL:
-    - Extrae la fecha automáticamente mediante Regex si recibe una ruta de archivo.
-    - Asegura compatibilidad de paths en Linux mediante os.makedirs.
-    - Integra el pipeline cinemático de PySteps (Flujo Óptico + Advección).
+    Acumula las tasas de lluvia sumando de forma estática las grillas cartesianas
+    y multiplicando por el delta de tiempo correspondiente.
     """
     import os
     import numpy as np
     import datetime as dt
     import re
     import netCDF4 as nc
-    from pathlib import Path
-    import pysteps
     
-    # 1. Asegurar la creación del directorio de salida
-    os.makedirs(str(path_output_acum), exist_ok=True)
-    
-    # 2. Extractor inteligente de fechas (Evita el ValueError por recibir rutas CFRadial)
-    date_str = str(date_file_ini)
-    if "/" in date_str or "cfrad." in date_str:
-        print("🕵️ Ruta detectada en date_file_ini. Extrayendo timestamp por Regex...")
-        nombre_archivo = os.path.basename(date_str)
-        match = re.search(r'(\d{8}_\d{6})', nombre_archivo)
-        if match:
-            date_ini = dt.datetime.strptime(match.group(1), '%Y%m%d_%H%M%S')
-        else:
-            date_ini = dt.datetime.now()
-            print("⚠️ No se detectó el patrón de fecha. Usando hora actual.")
-    else:
-        try:
-            date_ini = dt.datetime.strptime(date_str, '%Y%m%d_%H%M')
-        except ValueError:
-            try:
-                date_ini = dt.datetime.strptime(date_str, '%Y%m%d_%H%M%S')
-            except ValueError:
-                date_ini = dt.datetime.now()
-                print("⚠️ Formato de fecha no reconocido. Usando hora actual.")
-
-    print(f"⏰ Fecha base del evento sincronizada: {date_ini}")
-    print(f"📊 Consolidando acumulación temporal de {len(files_grid)} campos grillados...")
-
-    # 3. LEER SECUENCIA TEMPORAL DE RAIN_RATE
-    lista_mats = []
-    for f in sorted(files_grid):
-        with nc.Dataset(f, 'r') as ds:
-            # Extraemos la matriz de tasa de lluvia (rain_rate) de Py-ART
-            # Squeezamos dimensiones extras de tiempo/z si existieran (shape original 1, Y, X)
-            rr_data = np.squeeze(ds.variables['rain_rate'][:])
-            # Reemplazar enmascarados por ceros físicos
-            if np.ma.isMaskedArray(rr_data):
-                rr_data = rr_data.filled(0.0)
-            lista_mats.append(rr_data)
-            
-    # Convertir a array de PySteps: (Times, Y, X)
-    precip_seq = np.array(lista_mats)
-    
-    # 4. PIPELINE DE FLUJO ÓPTICO CON PYSTEPS
-    print("🔮 [PySteps] Calculando vectores de movimiento por Flujo Óptico (Lucas-Kanade)...")
-    # PySteps trabaja mejor en espacio logarítmico (transformación dBR)
-    # Remplazamos ceros por un umbral mínimo para evitar log(0)
-    precip_seq_transformed = np.where(precip_seq < 0.1, 0.0, precip_seq)
-    
-    # Tomamos el último par de mapas para derivar el vector de advección actual
-    oflow_method = pysteps.motion.get_method("LK")
-    v_motion = oflow_method(precip_seq_transformed[-2:, :, :])
-    
-    # 5. ADVECCIÓN Y ACUMULACIÓN CONTINUA (Mapeo entre barridos)
-    print("🏃 Interpolando movimiento de celdas mediante advección semi-lagrangiana...")
-    # Tiempo entre frentes de radar (típicamente 8 o 10 min en el RMA2)
-    # Estimamos el mapa intermedio para suavizar los saltos (acumulación en mm)
-    # Como aproximación operativa robusta, sumamos la secuencia ponderada por el intervalo temporal
-    intervalo_horas = kwargs.get('acum', 10) / 60.0
-    mapa_acumulado = np.sum(precip_seq, axis=0) * intervalo_horas
-
-# 6. ESCRITURA DEL NETCDF DE SALIDA ACUMULADO (Ruta corregida y fija para el mapa)
+    # 1. Asegurar la ruta estructural fija para la celda del mapa
     ruta_fija_mapa = "/content/salida/acumulados/RMA2"
     os.makedirs(ruta_fija_mapa, exist_ok=True)
     
+    # 2. Extractor por Regex para evitar que falle si recibe una ruta larga
+    date_str = str(date_file_ini)
+    match = re.search(r'(\d{8}_\d{6})', date_str)
+    if match:
+        date_ini = dt.datetime.strptime(match.group(1), '%Y%m%d_%H%M%S')
+    else:
+        date_ini = dt.datetime.now()
+        print("⚠️ No se pudo extraer la fecha por Regex. Usando hora actual.")
+    
+    print(f"⏰ Fecha base del evento: {date_ini}")
+    print(f"📊 Sumando estáticamente {len(files_grid)} archivos cartesianos...")
+    
+    # 3. Leer y limpiar las matrices netCDF generadas por Py-ART
+    lista_mats = []
+    for f in sorted(files_grid):
+        with nc.Dataset(f, 'r') as ds:
+            # Extraemos la tasa de lluvia (rain_rate)
+            rr_data = np.squeeze(ds.variables['rain_rate'][:])
+            
+            # BLINDAJE CRUCIAL: Convertimos cualquier máscara o NaN a 0.0 físico
+            # Esto evita que los valores nulos propaguen y te borren los datos válidos
+            if np.ma.isMaskedArray(rr_data):
+                rr_data = rr_data.filled(0.0)
+            rr_data = np.where(np.isnan(rr_data), 0.0, rr_data)
+            
+            lista_mats.append(rr_data)
+            
+    # 4. Aplicar tu ecuación original de acumulación
+    # Suma de tasas instantáneas (mm/h)
+    suma_tasas = np.sum(lista_mats, axis=0)
+    
+    # Factor temporal (dt en horas): 10 minutos / 60 minutos = 0.1666...
+    intervalo_minutos = kwargs.get('acum', 10)
+    intervalo_horas = intervalo_minutos / 60.0
+    
+    # Acumulado final en mm
+    mapa_acumulado = suma_tasas * intervalo_horas
+    
+    # 5. Escritura del NetCDF final en el directorio oficial
     file_out = os.path.join(ruta_fija_mapa, f"RMA2_acum_{date_ini:%Y%m%d_%H%M}.nc")
     
     with nc.Dataset(file_out, 'w', format='NETCDF4') as rootgrp:
-        # Crear dimensiones
+        # Definir dimensiones espaciales
         rootgrp.createDimension('time', None)
         rootgrp.createDimension('y', mapa_acumulado.shape[0])
         rootgrp.createDimension('x', mapa_acumulado.shape[1])
         
-        # Crear variables
+        # Crear variable principal de lluvia
         variables_acum = rootgrp.createVariable('acumulacion', 'f4', ('y', 'x'), zlib=True)
         variables_acum[:, :] = mapa_acumulado
         variables_acum.units = 'mm'
-        variables_acum.long_name = f'Precipitacion Acumulada Continua ({kwargs.get("acum", 10)} min)'
+        variables_acum.long_name = f'Precipitación Acumulada Estática ({intervalo_minutos} min)'
         
-        # Atributos globales mínimos
-        rootgrp.description = "Archivo operativo de acumulacion RQPE + PySteps - Taller"
+        # Metadatos globales necesarios para el script del mapa
+        rootgrp.description = "Archivo acumulado - Taller RQPE"
         rootgrp.timestamp = date_ini.strftime('%Y-%m-%d %H:%M:%S')
 
-    print(f"📦 ¡Mapa acumulado guardado exitosamente en la ruta oficial! Archivo disponible en: {file_out}")
+    print(f"📦 ¡Archivo acumulado consolidado con éxito! Guardado en: {file_out}")
     
-    # --- RETORNO REQUERIDO POR EL MAIN ---
+    # Retorno coordinado con la ejecución en bucle de tu RQPE_main.py
     return file_out, True
 
 def _add_qpe_to_radar_object(field, radar, field_name='qpe', units='mm/h', 
