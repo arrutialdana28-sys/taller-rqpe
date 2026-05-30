@@ -30,11 +30,11 @@ import datetime as dt
 from cartopy.geodesic import Geodesic
 
 
-def RQPE_simple_doble(file_qc, path_output_qpe, radar_viejo, path_statics, **kwargs):
+def RQPE_simple_doble(file_qc, path_output_qpe, *args, **kwargs):
     """
     Calcula la tasa de precipitación (QPE). 
-    CORRECCIÓN: Lee el objeto radar procesado desde el archivo QC del disco
-    en lugar de usar el volumen crudo de memoria.
+    BLINDAJE TOTAL: Absorbe flexiblemente cualquier argumento extra (*args, **kwargs)
+    y lee el objeto radar directamente desde el archivo limpio del disco.
     """
     import pyart
     import os
@@ -48,10 +48,10 @@ def RQPE_simple_doble(file_qc, path_output_qpe, radar_viejo, path_statics, **kwa
     file_out = os.path.join(path_output_qpe, nombre + '_qpe.nc')
     os.makedirs(os.path.dirname(file_out), exist_ok=True)
     
-    # 2. LECTURA CLAVE: Abrimos el radar que SÍ tiene el Control de Calidad y la polarimetría aplicada
+    # 2. LECTURA OPERATIVA: Abrimos el radar que ya pasó por el QC y tiene las variables polarimétricas
     radar = pyart.io.read(str(file_qc_path))
     
-    # 3. Extraer la reflectividad corregida por Z-Phi
+    # 3. Extraer la reflectividad de forma dinámica
     if 'dBZ_correc_zphi' in radar.fields:
         Zh = radar.fields['dBZ_correc_zphi']['data'].copy()
     elif 'DBZH_nomask' in radar.fields:
@@ -61,8 +61,7 @@ def RQPE_simple_doble(file_qc, path_output_qpe, radar_viejo, path_statics, **kwa
         
     print(f"🚀 [QPE Físico] Procesando matriz de reflectividad de {Zh.shape} para {nombre}")
     
-    # ... (A partir de acá el código de tu función sigue exactamente igual)
-
+    # ... (A partir de acá abajo, TODO el resto del código de tu función original sigue EXACTAMENTE igual)
 
 def Grid_RQPE(file_qpe, path_output_grid, radar,
               resolucion=2, radar_range=240, overwrite=False):
