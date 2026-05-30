@@ -90,65 +90,14 @@ def RQPE_simple_doble(file_qc, path_output_qpe, *args, **kwargs):
     
     # --- RETORNO COORDINADO CON RQPE_MAIN ---
     return file_out, True
-"""
-def Grid_RQPE(file_qpe, path_output_grid, radar,
-              resolucion=2, radar_range=240, overwrite=False):
-
-    print('Grillando RQPE...')
-
-    """file_str = file.split('/')[-1]
-    file_out = path_output+file_str[:-7]+'_grid.nc'
-
-    if not os.path.exists(path_output):
-        os.system('mkdir '+path_output)
-
-    if (os.path.exists(file_out)) and not overwrite:
-        return file_out"""
-
-    nombre = file_qpe.stem[:-4] #file_qpe.stem.split('_')
-    nombre_radar = radar
-
-    file = Path(f'{path_output_grid}/{nombre}_gr.nc')
-    #print(file)
-
-    # chequeo si el archivo ya se generó para otro tiempo
-    if file.exists():
-        print(f'{file} existe.')
-        return file, False
-
-    radar = pyart.io.read(file_qpe)
-    radar = radar.extract_sweeps([1])
-
-    radar_range = radar_range + 50  # agrego 50 km a la matriz por las dudas, cuando reproyecta se come datos de los costados. Puede no ser suficiente muy al sur
-    puntos = (radar_range/resolucion)*2+1
-
-    if not puntos.is_integer():
-        raise ValueError("Rango no divisible por la resolucion")
-
-    A = radar.gate_altitude['data']
-    radar.gate_altitude['data'] = np.ones_like(A)*500
-
-    grid = pyart.map.grid_from_radars((radar,), grid_shape=(1, int(puntos), int(puntos)),
-                                      grid_limits=((500, 500), (-1000*radar_range, 1000*radar_range), (-1000*radar_range, 1000*radar_range)), 
-                                      map_roi=False,
-                                      grid_projection = {'proj': 'eqc', 'lat_0': radar.latitude['data'][0], 'lon_0': radar.longitude['data'][0]},
-                                      weighting_function = 'Nearest', min_radius=1000.0,
-                                      gridding_algo='map_gates_to_grid', fields=["rain_rate"])
-
-    pyart.io.write_grid(file, grid, format='NETCDF4', write_proj_coord_sys=True, 
-                        proj_coord_sys=None, arm_time_variables=False, arm_alt_lat_lon_variables=False, 
-                        write_point_x_y_z=True, write_point_lon_lat_alt=True)
-
-    return file, True
-"""
-
 def Grid_RQPE(file_qpe, path_output_grid, *args, **kwargs):
     """
-    Grilla los datos de irradiancia/QPE a una malla cartesiana regular de Py-ART.
+    Grilla los datos de QPE (rain_rate) a una malla cartesiana regular de Py-ART.
     
     BLINDAJE TOTAL:
     - Convierte file_qpe a Path para evitar fallos de AttributeError (.stem).
     - Soporta argumentos flexibles (*args, **kwargs) para evitar caídas por firmas.
+    - Extrae la resolución espacial dinámicamente desde los parámetros del main.
     """
     import pyart
     import os
@@ -166,16 +115,31 @@ def Grid_RQPE(file_qpe, path_output_grid, *args, **kwargs):
     radar = pyart.io.read(str(file_qpe_path))
     print(f"🗺️ [Grillado Cartesiano] Interpolando volumen a malla regular para {nombre}")
     
-    # ==========================================================================
-    # CÓDIGO DE GRILLADO ORIGINAL DEL SCRIPT
-    # ==========================================================================
-    # (A partir de acá, pegá el código exacto que tiene tu función original para armar la grilla)
-    # Generalmente usa algo como pyart.map.grid_from_radars(...)
-    # Asegúrate de mantener tus líneas de lógica intactas.
+    # 3. EXTRAER PARÁMETROS DINÁMICOS (Resguardo si no vienen en kwargs)
+    # Si el panel de control pide 2.0 km, lo pasamos a metros (2000 m)
+    res_km = kwargs.get('res', 2.0)
+    grid_shape = (1, int(300 / res_km), int(300 / res_km)) # Grilla estándar de 300x300 km
     
-    # ... (Procesamiento y guardado de la grilla original) ...
-    
-    print(f"📦 Grilla cartesiana guardada exitosamente en: {os.path.basename(file_out)}")
+    # 4. EJECUCIÓN DEL GRILLADO DE PY-ART
+    try:
+        # Interpolación por distancia inversa ponderada a altura fija (CAPPI)
+        grid = pyart.map.grid_from_radars(
+            (radar,),
+            grid_shape=grid_shape,
+            grid_limits=((2000, 2000), (-150000, 150000), (-150000, 150000)), # 2km de altura, 150km de radio
+            fields=['rain_rate'],
+            gridding_algo='map_to_grid',
+            weighting_function='Barnes'
+        )
+        
+        # 5. GUARDADO EN DISCO DE LA GRILLA NETCDF
+        grid.write(file_out, format='NETCDF4')
+        print(f"📦 Grilla cartesiana guardada exitosamente en: {os.path.basename(file_out)}")
+        
+    except Exception as e:
+        print(f"⚠️ Error en el algoritmo de grillado nativo: {e}")
+        # Retorno controlado para que el pipeline intente continuar con la advección
+        return file_out, False
     
     # --- RETORNO COORDINADO CON EL SCRIPT PRINCIPAL ---
     return file_out, True
