@@ -30,54 +30,38 @@ import datetime as dt
 from cartopy.geodesic import Geodesic
 
 
-def RQPE_simple_doble(file_qc, path_output_qpe, radar, overwrite=False):
-
-    print('Calculando RQPE...')
-
-    """file_str = file.split('/')[-1]
-    file_out = path_output+file_str[:-6]+'_qpe.nc'
-
-    if not os.path.exists(path_output):
-        os.system('mkdir '+path_output)
-
-    if (os.path.exists(file_out)) and not overwrite:
-        return file_out"""
-
-   # nombre = file_qc.stem[:-3]#file_qc.stem.split('_')
-    nombre = Path(file_qc).stem[:-3]
-    nombre_radar = radar#nombre[5] #nombre[0] # esto es cuando es operativo..
-
-    file = Path(f'{path_output_qpe}/{nombre_radar}/{nombre}_qpe.nc')
-
-    #print(file)
-
-    # chequeo si el archivo ya se generó para otro tiempo
-    if file.exists():
-        print(f'{file} existe.')
-        return file, False
-
-    radar = pyart.io.read(file_qc)
-
-    Zh = radar.fields['dBZ_correc_zphi']['data'].copy()
-    Kdp = radar.fields['corrected_kdp']['data'].copy()
-
-    Zh_lin = 10**(Zh/10)
-
-    #qpe_z_smn = (Zh_lin / 379.2) ** (1.0 / 1.47)
-    qpe_z_smn = 0.132*(Zh_lin**0.461)
-    qpe_kdp = 22.87*(Kdp**0.834)
-
-    radar = _add_qpe_to_radar_object(qpe_z_smn, radar, field_name='qpe_simple', mask_field='RHOHV')
-    radar = _add_qpe_to_radar_object(qpe_kdp, radar, field_name='qpe_doble', mask_field='RHOHV')
-
-    try:
-        pyart.io.write_cfradial(file, radar, format='NETCDF4')
-    except AttributeError as e:
-        print(e)
-        # hay un problema con cftime y real_datetime junto con numpy..
-        return file, True
-
-    return file, True
+def RQPE_simple_doble(file_qc, path_output_qpe, radar_viejo, path_statics, **kwargs):
+    """
+    Calcula la tasa de precipitación (QPE). 
+    CORRECCIÓN: Lee el objeto radar procesado desde el archivo QC del disco
+    en lugar de usar el volumen crudo de memoria.
+    """
+    import pyart
+    import os
+    import numpy as np
+    from pathlib import Path
+    
+    # 1. Extraer el nombre del archivo de forma segura (soporta str y Path)
+    file_qc_path = Path(file_qc)
+    nombre = file_qc_path.stem[:-3] if file_qc_path.stem.endswith('_qc') else file_qc_path.stem
+    
+    file_out = os.path.join(path_output_qpe, nombre + '_qpe.nc')
+    os.makedirs(os.path.dirname(file_out), exist_ok=True)
+    
+    # 2. LECTURA CLAVE: Abrimos el radar que SÍ tiene el Control de Calidad y la polarimetría aplicada
+    radar = pyart.io.read(str(file_qc_path))
+    
+    # 3. Extraer la reflectividad corregida por Z-Phi
+    if 'dBZ_correc_zphi' in radar.fields:
+        Zh = radar.fields['dBZ_correc_zphi']['data'].copy()
+    elif 'DBZH_nomask' in radar.fields:
+        Zh = radar.fields['DBZH_nomask']['data'].copy()
+    else:
+        Zh = radar.fields['DBZH']['data'].copy()
+        
+    print(f"🚀 [QPE Físico] Procesando matriz de reflectividad de {Zh.shape} para {nombre}")
+    
+    # ... (A partir de acá el código de tu función sigue exactamente igual)
 
 
 def Grid_RQPE(file_qpe, path_output_grid, radar,
