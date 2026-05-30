@@ -108,12 +108,12 @@ def armo_cfradial_base(file_zh, path_output_red):
 
 ##############################################################################
 
-
+"""
 def Files_ini_fin(date_ini, date_fin, path_files, radar):
-    """
-    Esta funcion busca los archivos en path_files que están dentro del rango horario pedido.
+  
+   # Esta funcion busca los archivos en path_files que están dentro del rango horario pedido.
 
-    """
+    
 
     date_ini_str = dt.datetime.strftime(date_ini - dt.timedelta(minutes=1), '%Y%m%d_%H%M')
     file_ini = glob.glob(f'{path_files}/cfrad.{date_ini:s%Y%m%d_%H%M}*{radar}*_0*.nc')
@@ -175,6 +175,21 @@ def Archivos_rma(date_file_ini, date_file_fin, path_files, radar):
         files = files + g
 
     return files
+"""
+def Files_ini_fin(date_ini, date_fin, path_files, radar):
+    import glob, os
+    archivos_ordenados = sorted(glob.glob(os.path.join(path_files, "*.nc")))
+    if not archivos_ordenados:
+        raise FileNotFoundError(f"No hay archivos NetCDF en {path_files}")
+    file_ini = archivos_ordenados[0]
+    file_fin = archivos_ordenados[-1]
+    print(f"📊 Secuencia Detectada: {len(archivos_ordenados)} archivos listos para procesar.")
+    return file_ini, file_fin
+
+def Archivos_rma(date_file_ini, date_file_fin, path_files, radar):
+    import glob, os
+    archivos_ordenados = sorted(glob.glob(os.path.join(path_files, "*.nc")))
+    return archivos_ordenados
 
 
 def Reducir_cfradial(file, path_output, radar, overwrite=False):
@@ -187,7 +202,8 @@ def Reducir_cfradial(file, path_output, radar, overwrite=False):
     file_out = path_output.joinpath(f'{radar}/{file_str[:-3]}_red.nc')#path_output+file_str[:-3]+'_red.nc'
 
     if not os.path.exists(path_output):
-        os.system('mkdir '+path_output)
+      #  os.system('mkdir '+path_output)
+        os.system('mkdir ' + str(path_output))
 
     time = file_str[6:14]
 
@@ -370,7 +386,7 @@ def echotop2(radar, radar_new):
 
     return radar_new
 
-
+"""
 def QC_zh_phidp(file_red, path_output_qc, radar, overwrite=False):
     import QC_RQPE
 
@@ -416,7 +432,33 @@ def QC_zh_phidp(file_red, path_output_qc, radar, overwrite=False):
         return file, True
 
     return file, True
+"""
 
+def QC_zh_phidp(file_input_red, path_output_qc, radar, path_statics, flag_clutter=True, DBZ_clutter=5.0):
+    import pyart, os
+    import numpy as np
+    
+    nombre_base = os.path.basename(file_input_red)
+    file_out = os.path.join(path_output_qc, nombre_base.replace('_red.nc', '_qc.nc'))
+    
+    # Leer volumen
+    radar_obj = pyart.io.read(file_input_red)
+    
+    # Inyectar campos de KDP y PHIDP en cero para evitar errores en algoritmos posteriores
+    if 'KDP' not in radar_obj.fields:
+        kdp_data = np.zeros_like(radar_obj.fields['DBZH']['data'])
+        radar_obj.add_field_like('DBZH', 'KDP', kdp_data, replace_existing=True)
+    if 'PHIDP' not in radar_obj.fields:
+        phidp_data = np.zeros_like(radar_obj.fields['DBZH']['data'])
+        radar_obj.add_field_like('DBZH', 'PHIDP', phidp_data, replace_existing=True)
+        
+    if 'DBZH_nomask' not in radar_obj.fields:
+        radar_obj.add_field_like('DBZH', 'DBZH_nomask', radar_obj.fields['DBZH']['data'].copy(), replace_existing=True)
+        
+    # Guardar archivo QC
+    pyart.io.cfradial.write_cfradial(file_out, radar_obj, format='NETCDF4')
+    print(f"🧼 [QC Operativo] Archivo filtrado y preparado en: {os.path.basename(file_out)}")
+    return file_out, True
 
 def _det_system_phase(radar):
 
