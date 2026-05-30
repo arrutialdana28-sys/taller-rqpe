@@ -436,12 +436,13 @@ def QC_zh_phidp(file_red, path_output_qc, radar, overwrite=False):
 
 def QC_zh_phidp(file_input_red, path_output_qc, *args, **kwargs):
     """
-    Control de Calidad adaptado. Corrige la incompatibilidad de tipos 
-    de tiempo entre NumPy moderno y cftime/netCDF4.
+    Control de Calidad adaptado. Normaliza de forma absoluta los diccionarios 
+    de tiempo para evitar la incompatibilidad estructural entre NumPy y cftime.
     """
     import pyart
     import os
     import numpy as np
+    import datetime as dt
     
     nombre_base = os.path.basename(file_input_red)
     file_out = os.path.join(path_output_qc, nombre_base.replace('_red.nc', '_qc.nc'))
@@ -452,17 +453,32 @@ def QC_zh_phidp(file_input_red, path_output_qc, *args, **kwargs):
     # 1. Leer el volumen reducido
     radar_obj = pyart.io.read(file_input_red)
     
-    # --- PARCHE ANTICRASH NUMPY/CFTIME ---
-    # Forzamos a que el vector de tiempo sea un array numérico plano de floats sin máscaras inválidas
-    if 'time' in radar_obj.time:
-        tiempos_crudos = np.atleast_1d(radar_obj.time['data'])
-        if np.ma.isMaskedArray(tiempos_crudos):
-            radar_obj.time['data'] = tiempos_crudos.filled(0.0).astype(np.float64)
-        else:
-            radar_obj.time['data'] = np.array(tiempos_crudos, dtype=np.float64)
-    # --------------------------------------
+    # --- SUPER PARCHE DE TIEMPOS ULTRA-ROBUSTO ---
+    try:
+        # Aplanamos el array de datos de tiempo a float64 plano sin máscaras
+        if hasattr(radar_obj, 'time') and 'data' in radar_obj.time:
+            datos_tiempo = np.atleast_1d(radar_obj.time['data'])
+            if np.ma.isMaskedArray(datos_tiempo):
+                radar_obj.time['data'] = datos_tiempo.filled(0.0).astype(np.float64)
+            else:
+                radar_obj.time['data'] = np.array(datos_tiempo, dtype=np.float64)
+        
+        # Forzar strings limpios en metadatos temporales para que cftime no intente recalcular tipos complejos
+        if 'units' in radar_obj.time:
+            # Reaseguramos una unidad estándar plana
+            radar_obj.time['units'] = str(radar_obj.time['units'])
+            
+        # Si existen las variables de texto con objetos datetime corruptos, las pisamos con strings ISO
+        if hasattr(radar_obj, 'metadata'):
+            if 'start_time' in radar_obj.metadata:
+                radar_obj.metadata['start_time'] = str(radar_obj.metadata['start_time'])
+            if 'end_time' in radar_obj.metadata:
+                radar_obj.metadata['end_time'] = str(radar_obj.metadata['end_time'])
+    except Exception as e:
+        print(f"⚠️ Nota en normalización de tiempos: {e}")
+    # ----------------------------------------------
 
-    # Asegurar variables base para evitar fallos en módulos subsiguientes
+    # Asegurar variables base para evitar fallos en módulos de grillado o QPE
     if 'DBZH_nomask' not in radar_obj.fields:
         radar_obj.add_field_like('DBZH', 'DBZH_nomask', radar_obj.fields['DBZH']['data'].copy(), replace_existing=True)
         
