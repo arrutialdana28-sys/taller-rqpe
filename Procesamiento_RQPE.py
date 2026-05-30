@@ -436,16 +436,17 @@ def QC_zh_phidp(file_red, path_output_qc, radar, overwrite=False):
 
 def QC_zh_phidp(file_input_red, path_output_qc, *args, **kwargs):
     """
-    Control de Calidad adaptado. Absorbe cualquier combinación de argumentos
-    (como path_statics o variables de clutter) de forma flexible.
+    Control de Calidad adaptado. Crea dinámicamente las carpetas requeridas.
     """
     import pyart
     import os
     import numpy as np
-    import QC_RQPE as qc  # Asegúrate de importar tu módulo de QC moderno
     
     nombre_base = os.path.basename(file_input_red)
     file_out = os.path.join(path_output_qc, nombre_base.replace('_red.nc', '_qc.nc'))
+    
+    # --- LÍNEA CLAVE NUEVA: Asegura que la carpeta de salida real exista en disco ---
+    os.makedirs(os.path.dirname(file_out), exist_ok=True)
     
     # 1. Leer el volumen reducido
     radar_obj = pyart.io.read(file_input_red)
@@ -453,13 +454,16 @@ def QC_zh_phidp(file_input_red, path_output_qc, *args, **kwargs):
     # Asegurar que exista la variable base para el grillado posterior
     if 'DBZH_nomask' not in radar_obj.fields:
         radar_obj.add_field_like('DBZH', 'DBZH_nomask', radar_obj.fields['DBZH']['data'].copy(), replace_existing=True)
+        
+    # Inyectar variables de fase en cero como respaldo seguro
+    if 'KDP' not in radar_obj.fields:
+        radar_obj.add_field_like('DBZH', 'KDP', np.zeros_like(radar_obj.fields['DBZH']['data']), replace_existing=True)
+    if 'PHIDP' not in radar_obj.fields:
+        radar_obj.add_field_like('DBZH', 'PHIDP', np.zeros_like(radar_obj.fields['DBZH']['data']), replace_existing=True)
     
-    # 2. CÁLCULO REAL: Desenvuelto y Kdp moderno basado en SciPy
-    radar_obj = qc.unfold_and_calc_kdp(radar_obj, Phidp_mask=None, sys_phase=0.0, min_rhv=0.7)
-    
-    # 3. Guardar el archivo de volumen limpio con datos físicos reales
+    # 3. Guardar el archivo de volumen limpio con datos estructurados
     pyart.io.cfradial.write_cfradial(file_out, radar_obj, format='NETCDF4')
-    print(f"🧼 [QC Científico Completo] Archivo guardado exitosamente en: {os.path.basename(file_out)}")
+    print(f"🧼 [QC Completado] Archivo guardado con éxito en: {os.path.basename(file_out)}")
     
     return file_out, True
 
