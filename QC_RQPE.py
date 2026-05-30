@@ -156,41 +156,40 @@ def unfold_and_calc_kdp(radar, Phidp_mask, sys_phase=0., min_rhv=0.7):
 """
 
 
-def unfold_and_calc_kdp(radar, Phidp_mask, sys_phase=0.0, min_rhv=0.7):
+def unfold_and_calc_kdp(radar, Phidp_mask=None, sys_phase=0.0, min_rhv=0.7):
     """
-    Desenvuelve la fase diferencial (Phi_dp) y calcula el Kdp usando
-    el optimizador lineal nativo de Py-ART (basado en SciPy),
-    evitando la dependencia obsoleta de GLPK.
+    Calcula de forma real y polarimétrica los campos de PHIDP y KDP
+    utilizando el procesador de fase lineal nativo de Py-ART.
     """
     import pyart
     import numpy as np
 
-    print("🔮 Ejecutando Desenvuelto de Fase y Filtro SVD (Py-ART Modern)...")
+    print("🔮 [Polarimetría] Procesando fase diferencial y calculando Kdp...")
     
-    # 1. Extraer los nombres de los campos de reflectividad y correlación cruzada
+    # Asegurar nombres de campos estándar
     refl_field = 'DBZH_nomask' if 'DBZH_nomask' in radar.fields else 'DBZH'
     rhv_field = 'RHOHV' if 'RHOHV' in radar.fields else 'RH'
     
-    # 2. Correr el procesador de fase nativo de Py-ART (sin GLPK externo)
-    # Este método usa internamente SciPy para la optimización por tramos
     try:
-        phidp_dict, kdp_dict = pyart.correct.phase_proc_lp_from_soft(
+        # Motor de programación lineal nativo de Py-ART (usa scipy internamente)
+        kdp_dict, phidp_dict = pyart.correct.phase_proc_lp(
             radar,
-            cband=True,              # Cambiar a False si tus datos son Banda S o X
-            sys_phase=sys_phase,
+            0.0,                   # Constante de auto-rebase
+            self_const=60000.0,    # Parámetro de optimización de fase
+            low_z=10.0,            # Umbral mínimo de reflectividad
+            high_z=53.0,           # Umbral máximo de reflectividad
+            min_rhv=min_rhv,       # Filtrado por coeficiente de correlación
             refl_field=refl_field,
-            rhohv_field=rhv_field,
-            min_rhohv=min_rhv
+            rhohv_field=rhv_field
         )
         
-        # 3. Inyectar con éxito los campos calculados de forma real en el objeto radar
-        radar.add_field('PHIDP', phidp_dict, replace_existing=True)
+        # Inyectar los campos calculados REALES en el objeto radar
         radar.add_field('KDP', kdp_dict, replace_existing=True)
-        print("✅ Campos PHIDP y KDP calculados físicamente mediante optimización SciPy.")
+        radar.add_field('PHIDP', phidp_dict, replace_existing=True)
+        print("✅ [Física Activa] PHIDP y KDP calculados exitosamente mediante optimización.")
         
     except Exception as e:
-        print(f"⚠️ Error en procesamiento nativo rápido: {e}. Aplicando respaldo plano.")
-        # Respaldo seguro por si el volumen tiene perfiles incompletos
+        print(f"⚠️ Falló el cálculo polarimétrico: {e}. Aplicando respaldo numérico.")
         if 'KDP' not in radar.fields:
             radar.add_field_like(refl_field, 'KDP', np.zeros_like(radar.fields[refl_field]['data']), replace_existing=True)
         if 'PHIDP' not in radar.fields:
