@@ -349,8 +349,11 @@ def crear_netcdf_acum(files_grid, path_output_acum, date_file_ini, *args, **kwar
     intervalo_horas = kwargs.get('acum', 10) / 60.0
     mapa_acumulado = np.sum(precip_seq, axis=0) * intervalo_horas
 
-    # 6. ESCRITURA DEL NETCDF DE SALIDA ACUMULADO
-    file_out = os.path.join(str(path_output_acum), f"RMA2_acum_{date_ini:%Y%m%d_%H%M}.nc")
+# 6. ESCRITURA DEL NETCDF DE SALIDA ACUMULADO (Ruta corregida y fija para el mapa)
+    ruta_fija_mapa = "/content/salida/acumulados/RMA2"
+    os.makedirs(ruta_fija_mapa, exist_ok=True)
+    
+    file_out = os.path.join(ruta_fija_mapa, f"RMA2_acum_{date_ini:%Y%m%d_%H%M}.nc")
     
     with nc.Dataset(file_out, 'w', format='NETCDF4') as rootgrp:
         # Crear dimensiones
@@ -368,7 +371,7 @@ def crear_netcdf_acum(files_grid, path_output_acum, date_file_ini, *args, **kwar
         rootgrp.description = "Archivo operativo de acumulacion RQPE + PySteps - Taller"
         rootgrp.timestamp = date_ini.strftime('%Y-%m-%d %H:%M:%S')
 
-    print(f"📦 ¡Mapa acumulado guardado exitosamente! Archivo disponible en: {os.path.basename(file_out)}")
+    print(f"📦 ¡Mapa acumulado guardado exitosamente en la ruta oficial! Archivo disponible en: {file_out}")
     
     # --- RETORNO REQUERIDO POR EL MAIN ---
     return file_out, True
