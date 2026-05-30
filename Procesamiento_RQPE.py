@@ -435,29 +435,28 @@ def QC_zh_phidp(file_red, path_output_qc, radar, overwrite=False):
 """
 
 def QC_zh_phidp(file_input_red, path_output_qc, radar, path_statics, flag_clutter=True, DBZ_clutter=5.0):
-    import pyart, os
-    import numpy as np
+    import pyart
+    import os
+    import QC_RQPE  # Tu módulo con el método moderno
     
     nombre_base = os.path.basename(file_input_red)
     file_out = os.path.join(path_output_qc, nombre_base.replace('_red.nc', '_qc.nc'))
     
-    # Leer volumen
+    # 1. Leer el volumen reducido
     radar_obj = pyart.io.read(file_input_red)
     
-    # Inyectar campos de KDP y PHIDP en cero para evitar errores en algoritmos posteriores
-    if 'KDP' not in radar_obj.fields:
-        kdp_data = np.zeros_like(radar_obj.fields['DBZH']['data'])
-        radar_obj.add_field_like('DBZH', 'KDP', kdp_data, replace_existing=True)
-    if 'PHIDP' not in radar_obj.fields:
-        phidp_data = np.zeros_like(radar_obj.fields['DBZH']['data'])
-        radar_obj.add_field_like('DBZH', 'PHIDP', phidp_data, replace_existing=True)
-        
+    # Asegurar que exista la variable base para el grillado posterior
     if 'DBZH_nomask' not in radar_obj.fields:
         radar_obj.add_field_like('DBZH', 'DBZH_nomask', radar_obj.fields['DBZH']['data'].copy(), replace_existing=True)
-        
-    # Guardar archivo QC
+    
+    # 2. CALCULO REAL: Desenvuelto y Kdp con el método de SciPy moderno
+    # Cambiamos Phidp_mask por None o por tu máscara si la tenés calculada antes
+    radar_obj = QC_RQPE.unfold_and_calc_kdp(radar_obj, Phidp_mask=None, sys_phase=0.0, min_rhv=0.7)
+    
+    # 3. Guardar el archivo de volumen limpio con datos físicos reales
     pyart.io.cfradial.write_cfradial(file_out, radar_obj, format='NETCDF4')
-    print(f"🧼 [QC Operativo] Archivo filtrado y preparado en: {os.path.basename(file_out)}")
+    print(f"🧼 [QC Científico Completo] Archivo guardado con Kdp y Phidp reales en: {os.path.basename(file_out)}")
+    
     return file_out, True
 
 def _det_system_phase(radar):
