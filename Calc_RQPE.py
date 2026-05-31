@@ -93,22 +93,25 @@ def RQPE_simple_doble(file_qc, path_output_qpe, *args, **kwargs):
 
 def Grid_RQPE(file_qpe, path_output_grid, *args, **kwargs):
     """
-    Pasa los datos de QPE (polares) a una grilla cartesiana (metros).
-    Llena los vacíos con ceros para que la máscara no destruya la lluvia.
+    Toma el archivo QPE polar y lo pasa a una grilla cartesiana fija (X, Y).
+    Fuerza el nombre de salida para que termine exactamente en '_grid.nc'.
     """
     import pyart
     import os
     import numpy as np
     from pathlib import Path
     
+    # Asegurar la ruta de salida limpia
     file_qpe_path = Path(file_qpe)
-    nombre = file_qpe_path.stem[:-4] if file_qpe_path.stem.endswith('_qpe') else file_qpe_path.stem
-    file_out = os.path.join(path_output_grid, nombre + '_grid.nc')
+    # Reemplazamos cualquier sufijo previo para que quede prolijo
+    nombre_base = file_qpe_path.name.replace('_qpe.nc', '').replace('.nc', '')
+    file_out = os.path.join(path_output_grid, f"{nombre_base}_grid.nc")
     os.makedirs(os.path.dirname(file_out), exist_ok=True)
     
+    # Leer el volumen polar del QC
     radar = pyart.io.read(str(file_qpe_path))
     
-    # Rellenamos las máscaras con ceros antes de grillar para que no se coma los datos válidos
+    # BLINDAJE: Si Py-ART enmascaró datos por el clutter estático, los pasamos a 0.0
     if 'rain_rate' in radar.fields:
         data_raw = radar.fields['rain_rate']['data']
         if np.ma.isMaskedArray(data_raw):
@@ -117,7 +120,7 @@ def Grid_RQPE(file_qpe, path_output_grid, *args, **kwargs):
     res_km = kwargs.get('res', 2.0)
     grid_shape = (1, int(300 / res_km), int(300 / res_km)) 
     
-    # Grilleamos en un rango vertical amplio (1 a 4 km) para capturar toda la tormenta del QC
+    # Grillado en el rango vertical que contiene la tormenta real (1 a 4 km)
     grid = pyart.map.grid_from_radars(
         (radar,),
         grid_shape=grid_shape,
@@ -128,8 +131,9 @@ def Grid_RQPE(file_qpe, path_output_grid, *args, **kwargs):
         roi_func='dist_beam'
     )
     
+    # Guardar el archivo cartesiano oficial
     grid.write(file_out, format='NETCDF4')
-    print(f"✅ Grilla cartesiana generada: {os.path.basename(file_out)}")
+    print(f"✅ [Grillado] Archivo cartesiano generado con éxito: {os.path.basename(file_out)}")
     return file_out, True
     
 def advection_correction(R, T=5, t=1):
@@ -261,7 +265,7 @@ def remove_corners(Acum, lat, lon, radar_lat, radar_lon):
 
 def crear_netcdf_acum(files_grid, path_output_acum, date_file_ini, *args, **kwargs):
     """
-    Toma los archivos _grid.nc, los suma estáticamente y multiplica por el delta de tiempo.
+    Suma las grillas cartesianas de forma estática y las multiplica por el delta de tiempo.
     """
     import os
     import numpy as np
@@ -272,21 +276,27 @@ def crear_netcdf_acum(files_grid, path_output_acum, date_file_ini, *args, **kwar
     ruta_fija_mapa = "/content/salida/acumulados/RMA2"
     os.makedirs(ruta_fija_mapa, exist_ok=True)
     
+    # Extraer la estampa de tiempo para el nombre del archivo final
     date_str = str(date_file_ini)
     match = re.search(r'(\d{8}_\d{6})', date_str)
     date_ini = dt.datetime.strptime(match.group(1), '%Y%m%d_%H%M%S') if match else dt.datetime.now()
     
     lista_mats = []
+    print(f"📊 Procesando {len(files_grid)} archivos cartesianos para la acumulación...")
+    
     for f in sorted(files_grid):
         with nc.Dataset(f, 'r') as ds:
-            # Extraemos la matriz de la grilla cartesiana (Y, X)
+            # Extraemos la matriz de lluvia (Y, X) quitando la dimensión temporal virtual
             rr_data = np.squeeze(ds.variables['rain_rate'][:])
+            
+            # Reemplazar máscaras o NaNs por ceros para evitar que se propague el vacío
             if np.ma.isMaskedArray(rr_data):
                 rr_data = rr_data.filled(0.0)
             rr_data = np.where(np.isnan(rr_data), 0.0, rr_data)
+            
             lista_mats.append(rr_data)
             
-    # Tu ecuación: Suma de mm/h * factor de horas (10 min / 60 min)
+    # Tu ecuación original de acumulación estática (Suma * dt en horas)
     mapa_acumulado = np.sum(lista_mats, axis=0) * (kwargs.get('acum', 10) / 60.0)
     
     file_out = os.path.join(ruta_fija_mapa, f"RMA2_acum_{date_ini:%Y%m%d_%H%M}.nc")
@@ -298,7 +308,7 @@ def crear_netcdf_acum(files_grid, path_output_acum, date_file_ini, *args, **kwar
         variables_acum[:, :] = mapa_acumulado
         rootgrp.timestamp = date_ini.strftime('%Y-%m-%d %H:%M:%S')
         
-    print(f"📦 ¡Archivo acumulado original guardado en ruta oficial! {file_out}")
+    print(f"📦 ¡Archivo acumulado consolidado en ruta oficial!: {file_out}")
     return file_out, True
 
 def _add_qpe_to_radar_object(field, radar, field_name='qpe', units='mm/h', 
