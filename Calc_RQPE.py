@@ -94,36 +94,33 @@ def RQPE_simple_doble(file_qc, path_output_qpe, *args, **kwargs):
 def Grid_RQPE(file_qpe, path_output_grid, radar,
               resolucion=2, radar_range=240, overwrite=False):
     """
-    Tu función original corregida:
-    - Convierte la ruta a objeto Path para evitar el AttributeError.
-    - Plancha el volumen a 500m para hacer la proyección 2D por Vecino Cercano.
+    Tu función original intacta:
+    Garantiza que file_qpe se trate como Path para evitar el AttributeError,
+    conservando tu lógica de planchar alturas a 500m y proyección 'eqc'.
     """
     import pyart
     import os
     import numpy as np
     from pathlib import Path
 
-    print('🗺️ Grillando RQPE con tu lógica original de plano estático...')
+    print('Grillando RQPE...')
 
-    # BLINDAJE CRUCIAL: Forzamos que file_qpe sea un objeto Path
+    # Aseguramos el tipo Path para que .stem no falle nunca
     file_qpe_path = Path(file_qpe)
-    
-    # Ahora .stem sí funciona de forma segura
-    nombre = file_qpe_path.stem[:-4] if file_qpe_path.stem.endswith('_qpe') else file_qpe_path.stem
+
+    nombre = file_qpe_path.name.replace('_qpe.nc', '').replace('.nc', '')
     nombre_radar = radar
 
-    # Mantenemos TU formato de nombre original exacto: _gr.nc
+    # TU nombre de salida original exacto
     file = Path(f'{path_output_grid}/{nombre}_gr.nc')
-    os.makedirs(os.path.dirname(file), exist_ok=True)
 
+    # Chequeo de existencia original
     if file.exists() and not overwrite:
         print(f'{file} existe.')
         return file, False
 
-    # pyart necesita la ruta como string, lo pasamos explícitamente
+    # pyart requiere el string de la ruta
     radar_obj = pyart.io.read(str(file_qpe_path))
-    
-    # Extraemos el barrido operativo bajo (sweep 1)
     radar_obj = radar_obj.extract_sweeps([1])
 
     radar_range = radar_range + 50  
@@ -132,11 +129,11 @@ def Grid_RQPE(file_qpe, path_output_grid, radar,
     if not puntos.is_integer():
         raise ValueError("Rango no divisible por la resolucion")
 
-    # TU TRUCO FÍSICO: Planchar el volumen a un plano de 500m
+    # TU HACK FÍSICO ORIGINAL: Planchar alturas a 500m
     A = radar_obj.gate_altitude['data']
     radar_obj.gate_altitude['data'] = np.ones_like(A) * 500
 
-    # Ejecución de grillado por asignación directa ('map_gates_to_grid')
+    # Tu grillado original por vecino más cercano en proyección EQC
     grid = pyart.map.grid_from_radars(
         (radar_obj,), 
         grid_shape=(1, int(puntos), int(puntos)),
@@ -149,13 +146,13 @@ def Grid_RQPE(file_qpe, path_output_grid, radar,
         fields=["rain_rate"]
     )
 
+    # Escritura original con tus variables de puntos x, y, z, lat, lon
     pyart.io.write_grid(
         str(file), grid, format='NETCDF4', write_proj_coord_sys=True,
         proj_coord_sys=None, arm_time_variables=False, arm_alt_lat_lon_variables=False,
         write_point_x_y_z=True, write_point_lon_lat_alt=True
     )
 
-    print(f"✅ Grilla cartesiana regular generada: {file.name}")
     return file, True
                   
 def advection_correction(R, T=5, t=1):
