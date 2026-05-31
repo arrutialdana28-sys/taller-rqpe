@@ -91,51 +91,66 @@ def RQPE_simple_doble(file_qc, path_output_qpe, *args, **kwargs):
     # --- RETORNO COORDINADO CON RQPE_MAIN ---
     return file_out, True
 
-def Grid_RQPE(file_qpe, path_output_grid, *args, **kwargs):
+def Grid_RQPE(file_qpe, path_output_grid, radar,
+              resolucion=2, radar_range=240, overwrite=False):
     """
-    Toma el archivo QPE polar y lo pasa a una grilla cartesiana fija (X, Y).
-    Fuerza el nombre de salida para que termine exactamente en '_grid.nc'.
+    Tu función original: Plancha las alturas a 500m para hacer una
+    proyección cartesiana 2D pura por Vecino Más Cercano (Nearest).
     """
     import pyart
     import os
     import numpy as np
     from pathlib import Path
-    
-    # Asegurar la ruta de salida limpia
-    file_qpe_path = Path(file_qpe)
-    # Reemplazamos cualquier sufijo previo para que quede prolijo
-    nombre_base = file_qpe_path.name.replace('_qpe.nc', '').replace('.nc', '')
-    file_out = os.path.join(path_output_grid, f"{nombre_base}_grid.nc")
-    os.makedirs(os.path.dirname(file_out), exist_ok=True)
-    
-    # Leer el volumen polar del QC
-    radar = pyart.io.read(str(file_qpe_path))
-    
-    # BLINDAJE: Si Py-ART enmascaró datos por el clutter estático, los pasamos a 0.0
-    if 'rain_rate' in radar.fields:
-        data_raw = radar.fields['rain_rate']['data']
-        if np.ma.isMaskedArray(data_raw):
-            radar.fields['rain_rate']['data'] = data_raw.filled(0.0)
-            
-    res_km = kwargs.get('res', 2.0)
-    grid_shape = (1, int(300 / res_km), int(300 / res_km)) 
-    
-    # Grillado en el rango vertical que contiene la tormenta real (1 a 4 km)
+
+    print('🗺️ Grillando RQPE con tu lógica original de plano estático...')
+
+    nombre = file_qpe.stem[:-4] if file_qpe.stem.endswith('_qpe') else file_qpe.stem
+    nombre_radar = radar
+
+    # Mantenemos TU formato de nombre original exacto: _gr.nc
+    file = Path(f'{path_output_grid}/{nombre}_gr.nc')
+    os.makedirs(os.path.dirname(file), exist_ok=True)
+
+    if file.exists() and not overwrite:
+        print(f'{file} existe.')
+        return file, False
+
+    radar_obj = pyart.io.read(file_qpe)
+    # Extraemos el barrido operativo bajo (sweep 1)
+    radar_obj = radar_obj.extract_sweeps([1])
+
+    radar_range = radar_range + 50  
+    puntos = (radar_range / resolucion) * 2 + 1
+
+    if not puntos.is_integer():
+        raise ValueError("Rango no divisible por la resolucion")
+
+    # TU TRUCO FÍSICO: Planchar el volumen a un plano bidimensional chato de 500m
+    A = radar_obj.gate_altitude['data']
+    radar_obj.gate_altitude['data'] = np.ones_like(A) * 500
+
+    # Ejecución de grillado por asignación directa directa ('map_gates_to_grid')
     grid = pyart.map.grid_from_radars(
-        (radar,),
-        grid_shape=grid_shape,
-        grid_limits=((1000, 4000), (-150000, 150000), (-150000, 150000)),
-        fields=['rain_rate'],
-        gridding_algo='map_to_grid',
-        weighting_function='Barnes',
-        roi_func='dist_beam'
+        (radar_obj,), 
+        grid_shape=(1, int(puntos), int(puntos)),
+        grid_limits=((500, 500), (-1000 * radar_range, 1000 * radar_range), (-1000 * radar_range, 1000 * radar_range)),
+        map_roi=False,
+        grid_projection={'proj': 'eqc', 'lat_0': radar_obj.latitude['data'][0], 'lon_0': radar_obj.longitude['data'][0]},
+        weighting_function='Nearest', 
+        min_radius=1000.0,
+        gridding_algo='map_gates_to_grid', 
+        fields=["rain_rate"]
     )
-    
-    # Guardar el archivo cartesiano oficial
-    grid.write(file_out, format='NETCDF4')
-    print(f"✅ [Grillado] Archivo cartesiano generado con éxito: {os.path.basename(file_out)}")
-    return file_out, True
-    
+
+    pyart.io.write_grid(
+        file, grid, format='NETCDF4', write_proj_coord_sys=True,
+        proj_coord_sys=None, arm_time_variables=False, arm_alt_lat_lon_variables=False,
+        write_point_x_y_z=True, write_point_lon_lat_alt=True
+    )
+
+    print(f"✅ Grilla cartesiana regular generada: {file.name}")
+    return file, True
+                  
 def advection_correction(R, T=5, t=1):
     """
     R = np.array([qpe_previous, qpe_current])
