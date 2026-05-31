@@ -23,7 +23,7 @@ import wradlib as wrl
 import copy
 import pyart_funciones_modificadas as pyart_mod
 
-
+"""
 def make_QC_ZH(radar_qc):
 
     Zh = radar_qc.fields['DBZH']['data'].copy()
@@ -61,8 +61,58 @@ def make_QC_ZH(radar_qc):
     radar_qc.fields['DBZH_nomask']['data'][:] = Zh
 
     return radar_qc
+"""
+def make_QC_ZH(radar_qc):
+    # 1. Obtenemos datos de DBZH
+    Zh = radar_qc.fields['DBZH']['data'].copy()
+    
+    # 2. Aquí es donde se destruye el objeto original y se crea uno nuevo
+    # que NO tiene tus campos inyectados.
+    radar_qc = _add_zh_to_radar_object(Zh, radar_qc, mask_field='RHOHV')
+    
+    # 3. SOLUCIÓN: Re-inyectamos los campos perdidos antes de intentar leerlos
+    # Recuperamos los datos del objeto original (pasado por referencia) o recreamos
+    # Si 'Echotop' existía en el radar, lo volvemos a poner aquí
+    if 'Echotop' in radar.fields: # Usamos el radar del scope global/padre
+        radar_qc.add_field('Echotop', radar.fields['Echotop'])
+    
+    # Lo mismo para wet_radome
+    if 'wet_radome' not in radar_qc.metadata:
+        radar_qc.metadata['wet_radome'] = radar.metadata.get('wet_radome', 'False')
 
+    # 4. Ahora el QC puede leer los campos sin fallar
+    echotop = radar_qc.fields['Echotop']['data'][:]
+    wet_rad = radar_qc.metadata['wet_radome']
+    
+    Rhohv = radar_qc.fields['RHOHV']['data'].copy()
 
+    if wet_rad in ['False']:  # ???
+        Zh[echotop<1500] = np.nan
+
+    # Sacamos los pixeles con rhohv bajos y regiones de reflectividad baja y rhohv menores a 0.8
+    Zh[(Rhohv<0.7)] = np.nan
+    Zh[(Rhohv<0.8) & (Zh<10)] = np.nan
+
+    # Calculamos la textura de rhohv y sacamos en Phidp y en Zh los valores altos de textura
+    rhot = wrl.dp.texture(Rhohv)
+    rhot_thr = 0.3
+    Zh[rhot > rhot_thr] = np.nan
+
+    # Aplicamos el filtro de gabella en Zh y removemos en Phidp
+    clmap = wrl.classify.filter_gabella(Zh, wsize=5, thrsnorain=0.0, tr1=20., n_p=6, tr2=1.3, rm_nans=False)
+    Zh[clmap] = np.nan
+
+    # Aplicamos depeckle
+    Zh = wrl.util.despeckle(Zh, n=3, copy=False)
+
+    # Enmascaramos y guardamos en el objeto radar
+    Zh[np.isnan(Zh)] = -9999.
+    Zh = np.ma.masked_where(Zh==-9999., Zh)
+
+    radar_qc.fields['DBZH_nomask']['data'][:] = Zh
+
+    return radar_qc
+    
 def make_QC_PHIDP(radar, sys_phase=0):
 
     wet_rad=radar.metadata['wet_radome']
