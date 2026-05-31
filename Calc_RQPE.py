@@ -94,8 +94,9 @@ def RQPE_simple_doble(file_qc, path_output_qpe, *args, **kwargs):
 def Grid_RQPE(file_qpe, path_output_grid, radar,
               resolucion=2, radar_range=240, overwrite=False):
     """
-    Tu función original: Plancha las alturas a 500m para hacer una
-    proyección cartesiana 2D pura por Vecino Más Cercano (Nearest).
+    Tu función original corregida:
+    - Convierte la ruta a objeto Path para evitar el AttributeError.
+    - Plancha el volumen a 500m para hacer la proyección 2D por Vecino Cercano.
     """
     import pyart
     import os
@@ -104,7 +105,11 @@ def Grid_RQPE(file_qpe, path_output_grid, radar,
 
     print('🗺️ Grillando RQPE con tu lógica original de plano estático...')
 
-    nombre = file_qpe.stem[:-4] if file_qpe.stem.endswith('_qpe') else file_qpe.stem
+    # BLINDAJE CRUCIAL: Forzamos que file_qpe sea un objeto Path
+    file_qpe_path = Path(file_qpe)
+    
+    # Ahora .stem sí funciona de forma segura
+    nombre = file_qpe_path.stem[:-4] if file_qpe_path.stem.endswith('_qpe') else file_qpe_path.stem
     nombre_radar = radar
 
     # Mantenemos TU formato de nombre original exacto: _gr.nc
@@ -115,7 +120,9 @@ def Grid_RQPE(file_qpe, path_output_grid, radar,
         print(f'{file} existe.')
         return file, False
 
-    radar_obj = pyart.io.read(file_qpe)
+    # pyart necesita la ruta como string, lo pasamos explícitamente
+    radar_obj = pyart.io.read(str(file_qpe_path))
+    
     # Extraemos el barrido operativo bajo (sweep 1)
     radar_obj = radar_obj.extract_sweeps([1])
 
@@ -125,11 +132,11 @@ def Grid_RQPE(file_qpe, path_output_grid, radar,
     if not puntos.is_integer():
         raise ValueError("Rango no divisible por la resolucion")
 
-    # TU TRUCO FÍSICO: Planchar el volumen a un plano bidimensional chato de 500m
+    # TU TRUCO FÍSICO: Planchar el volumen a un plano de 500m
     A = radar_obj.gate_altitude['data']
     radar_obj.gate_altitude['data'] = np.ones_like(A) * 500
 
-    # Ejecución de grillado por asignación directa directa ('map_gates_to_grid')
+    # Ejecución de grillado por asignación directa ('map_gates_to_grid')
     grid = pyart.map.grid_from_radars(
         (radar_obj,), 
         grid_shape=(1, int(puntos), int(puntos)),
@@ -143,7 +150,7 @@ def Grid_RQPE(file_qpe, path_output_grid, radar,
     )
 
     pyart.io.write_grid(
-        file, grid, format='NETCDF4', write_proj_coord_sys=True,
+        str(file), grid, format='NETCDF4', write_proj_coord_sys=True,
         proj_coord_sys=None, arm_time_variables=False, arm_alt_lat_lon_variables=False,
         write_point_x_y_z=True, write_point_lon_lat_alt=True
     )
