@@ -63,26 +63,25 @@ def make_QC_ZH(radar_qc):
     return radar_qc
 """
 def make_QC_ZH(radar_qc):
-    # 1. Obtenemos Zh para el proceso
-    Zh = radar_qc.fields['DBZH']['data'].copy()
-    
-    # 2. Guardamos temporalmente el estado de tus campos personalizados
-    # Extraemos 'Echotop' y 'wet_radome' del radar ANTES de que sea procesado
-    temp_echotop = radar_qc.fields.get('Echotop')
+    # Guardamos una referencia de los campos que vamos a perder al reasignar
+    # Hacemos una copia de los datos por seguridad
+    temp_echotop_dict = radar_qc.fields.get('Echotop', None)
     temp_wet = radar_qc.metadata.get('wet_radome', 'False')
 
-    # 3. Llamada original que crea el nuevo objeto radar
+    Zh = radar_qc.fields['DBZH']['data'].copy()
+    
+    # Esta línea crea un nuevo objeto y descarta lo anterior
     radar_qc = _add_zh_to_radar_object(Zh, radar_qc, mask_field='RHOHV')
 
-    # 4. RE-INYECTAMOS los campos al NUEVO objeto creado por el QC
-    if temp_echotop is not None:
-        radar_qc.add_field('Echotop', temp_echotop, replace_existing=True)
+    # RE-INYECTAMOS lo perdido al nuevo objeto
+    if temp_echotop_dict is not None:
+        radar_qc.add_field('Echotop', temp_echotop_dict, replace_existing=True)
     
     radar_qc.metadata['wet_radome'] = temp_wet
 
-    # Ahora el objeto radar_qc tiene todo lo necesario para las líneas 32 y 34
+    # Ahora esto ya no debería dar KeyError
     echotop = radar_qc.fields['Echotop']['data'][:]
-    wet_rad = radar_qc.metadata['wet_radome']
+    wet_rad = radar_qc.metadata['wet_radome'][:]
     
     Rhohv = radar_qc.fields['RHOHV']['data'].copy()
 
