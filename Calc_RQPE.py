@@ -31,105 +31,105 @@ from cartopy.geodesic import Geodesic
 
 
 def RQPE_simple_doble(file_qc, path_output_qpe, radar, overwrite=False):
-    print(f'Procesando entrada: {file_qc}')
-    
-    # Aseguramos que file_qc sea un Path
-    from pathlib import Path
-    file_qc_path = Path(file_qc)
 
-    # El nombre base de tu archivo es algo como "cfrad.2024..._red"
-    # Vamos a limpiar el sufijo _red o _qc de forma explícita
-    nombre_base = file_qc_path.stem
-    if nombre_base.endswith('_red'):
-        nombre_base = nombre_base[:-4] # Quitamos '_red'
-    elif nombre_base.endswith('_qc'):
-        nombre_base = nombre_base[:-3] # Quitamos '_qc'
-    file_out = Path(f"{path_output_qpe}/{nombre_base}_qpe.nc")
-    
-    # Aseguramos que la ruta de salida exista
-    os.makedirs(path_output_qpe, exist_ok=True)
+    print('Calculando RQPE...')
 
-    if file_out.exists() and not overwrite:
-        print(f"El archivo {file_out} ya existe, saltando.")
-        return str(file_out), False
+    """file_str = file.split('/')[-1]
+    file_out = path_output+file_str[:-6]+'_qpe.nc'
 
-    # Leemos el radar
-    radar_obj = pyart.io.read(str(file_qc_path))
+    if not os.path.exists(path_output):
+        os.system('mkdir '+path_output)
 
-    # --- AQUÍ VA TU LÓGICA DE CÁLCULO ---
-    # [MANTENÉ TU LÓGICA MATEMÁTICA AQUÍ]
-    
-    # Escribimos el archivo QPE resultante
-    pyart.io.write_cfradial(str(file_out), radar_obj)
-    print(f"✅ Archivo QPE generado: {file_out}")
+    if (os.path.exists(file_out)) and not overwrite:
+        return file_out"""
 
-    return str(file_out), True
-    
+    nombre = file_qc.stem[:-3]#file_qc.stem.split('_')
+    nombre_radar = radar#nombre[5] #nombre[0] # esto es cuando es operativo..
+
+    file = Path(f'{path_output_qpe}/{nombre_radar}/{nombre}_qpe.nc')
+
+    #print(file)
+
+    # chequeo si el archivo ya se generó para otro tiempo
+    if file.exists():
+        print(f'{file} existe.')
+        return file, False
+
+    radar = pyart.io.read(file_qc)
+
+    Zh = radar.fields['dBZ_correc_zphi']['data'].copy()
+    Kdp = radar.fields['corrected_kdp']['data'].copy()
+
+    Zh_lin = 10**(Zh/10)
+
+    #qpe_z_smn = (Zh_lin / 379.2) ** (1.0 / 1.47)
+    qpe_z_smn = 0.132*(Zh_lin**0.461)
+    qpe_kdp = 22.87*(Kdp**0.834)
+
+    radar = _add_qpe_to_radar_object(qpe_z_smn, radar, field_name='qpe_simple', mask_field='RHOHV')
+    radar = _add_qpe_to_radar_object(qpe_kdp, radar, field_name='qpe_doble', mask_field='RHOHV')
+
+    try:
+        pyart.io.write_cfradial(file, radar, format='NETCDF4')
+    except AttributeError as e:
+        print(e)
+        # hay un problema con cftime y real_datetime junto con numpy..
+        return file, True
+
+    return file, True
+
+
 def Grid_RQPE(file_qpe, path_output_grid, radar,
               resolucion=2, radar_range=240, overwrite=False):
 
     print('Grillando RQPE...')
-    
-    # 1. Blindaje de tipo: Resolvemos el problema de la cadena rota de Pathlib
-    from pathlib import Path
-    file_qpe_path = Path(file_qpe)
 
-    # 2. Tu lógica original exacta para extraer la raíz del nombre
-    if file_qpe_path.stem.endswith('_qpe'):
-        nombre = file_qpe_path.stem[:-4]
-    else:
-        nombre = file_qpe_path.stem
-        
+    """file_str = file.split('/')[-1]
+    file_out = path_output+file_str[:-7]+'_grid.nc'
+
+    if not os.path.exists(path_output):
+        os.system('mkdir '+path_output)
+
+    if (os.path.exists(file_out)) and not overwrite:
+        return file_out"""
+
+    nombre = file_qpe.stem[:-4] #file_qpe.stem.split('_')
     nombre_radar = radar
 
-    # 3. Construcción del archivo de salida en la ruta que fijó tu RQPE_main.py
     file = Path(f'{path_output_grid}/{nombre}_gr.nc')
+    #print(file)
 
-    # Chequeo de existencia
-    if file.exists() and not overwrite:
+    # chequeo si el archivo ya se generó para otro tiempo
+    if file.exists():
         print(f'{file} existe.')
         return file, False
 
-    # 4. Lectura segura pasando el string de la ruta a Py-ART
-    radar_obj = pyart.io.read(str(file_qpe_path))
-    
-    # Tomamos el sweep 0, ya que viene de la reducción previa
-    radar_obj = radar_obj.extract_sweeps([0])
+    radar = pyart.io.read(file_qpe)
+    radar = radar.extract_sweeps([1])
 
-    radar_range = radar_range + 50  
-    puntos = (radar_range / resolucion) * 2 + 1
+    radar_range = radar_range + 50  # agrego 50 km a la matriz por las dudas, cuando reproyecta se come datos de los costados. Puede no ser suficiente muy al sur
+    puntos = (radar_range/resolucion)*2+1
 
     if not puntos.is_integer():
         raise ValueError("Rango no divisible por la resolucion")
 
-    # TU TRUCO FÍSICO ORIGINAL: Forzar el volumen a un plano de 500m
-    A = radar_obj.gate_altitude['data']
-    radar_obj.gate_altitude['data'] = np.ones_like(A) * 500
+    A = radar.gate_altitude['data']
+    radar.gate_altitude['data'] = np.ones_like(A)*500
 
-    # Tu grillado original por vecino más cercano con proyección EQC
-    grid = pyart.map.grid_from_radars(
-        (radar_obj,), 
-        grid_shape=(1, int(puntos), int(puntos)),
-        grid_limits=((500, 500), (-1000 * radar_range, 1000 * radar_range), (-1000 * radar_range, 1000 * radar_range)),
-        map_roi=False,
-        grid_projection={'proj': 'eqc', 'lat_0': radar_obj.latitude['data'][0], 'lon_0': radar_obj.longitude['data'][0]},
-        weighting_function='Nearest', 
-        min_radius=1000.0,
-        gridding_algo='map_gates_to_grid', 
-        fields=["rain_rate"]
-    )
+    grid = pyart.map.grid_from_radars((radar,), grid_shape=(1, int(puntos), int(puntos)),
+                                      grid_limits=((500, 500), (-1000*radar_range, 1000*radar_range), (-1000*radar_range, 1000*radar_range)), 
+                                      map_roi=False,
+                                      grid_projection = {'proj': 'eqc', 'lat_0': radar.latitude['data'][0], 'lon_0': radar.longitude['data'][0]},
+                                      weighting_function = 'Nearest', min_radius=1000.0,
+                                      gridding_algo='map_gates_to_grid', fields=["rain_rate"])
 
-    # 5. Escritura física real en disco
-    os.makedirs(os.path.dirname(file), exist_ok=True)
-    pyart.io.write_grid(
-        str(file), grid, format='NETCDF4', write_proj_coord_sys=True,
-        proj_coord_sys=None, arm_time_variables=False, arm_alt_lat_lon_variables=False,
-        write_point_x_y_z=True, write_point_lon_lat_alt=True
-    )
-    
-    print(f"✅ Archivo escrito con éxito: {file}")
+    pyart.io.write_grid(file, grid, format='NETCDF4', write_proj_coord_sys=True, 
+                        proj_coord_sys=None, arm_time_variables=False, arm_alt_lat_lon_variables=False, 
+                        write_point_x_y_z=True, write_point_lon_lat_alt=True)
+
     return file, True
-                  
+
+
 def advection_correction(R, T=5, t=1):
     """
     R = np.array([qpe_previous, qpe_current])
@@ -257,53 +257,105 @@ def remove_corners(Acum, lat, lon, radar_lat, radar_lon):
     return Acum_cor
 
 
-def crear_netcdf_acum(files_grid, path_output_acum, date_file_ini, *args, **kwargs):
-    """
-    Suma las grillas cartesianas de forma estática y las multiplica por el delta de tiempo.
-    """
-    import os
-    import numpy as np
-    import datetime as dt
-    import re
-    import netCDF4 as nc
-    
-    ruta_fija_mapa = "/content/salida/acumulados/RMA2"
-    os.makedirs(ruta_fija_mapa, exist_ok=True)
-    
-    # Extraer la estampa de tiempo para el nombre del archivo final
-    date_str = str(date_file_ini)
-    match = re.search(r'(\d{8}_\d{6})', date_str)
-    date_ini = dt.datetime.strptime(match.group(1), '%Y%m%d_%H%M%S') if match else dt.datetime.now()
-    
-    lista_mats = []
-    print(f"📊 Procesando {len(files_grid)} archivos cartesianos para la acumulación...")
-    
-    for f in sorted(files_grid):
-        with nc.Dataset(f, 'r') as ds:
-            # Extraemos la matriz de lluvia (Y, X) quitando la dimensión temporal virtual
-            rr_data = np.squeeze(ds.variables['rain_rate'][:])
-            
-            # Reemplazar máscaras o NaNs por ceros para evitar que se propague el vacío
-            if np.ma.isMaskedArray(rr_data):
-                rr_data = rr_data.filled(0.0)
-            rr_data = np.where(np.isnan(rr_data), 0.0, rr_data)
-            
-            lista_mats.append(rr_data)
-            
-    # Tu ecuación original de acumulación estática (Suma * dt en horas)
-    mapa_acumulado = np.sum(lista_mats, axis=0) * (kwargs.get('acum', 10) / 60.0)
-    
-    file_out = os.path.join(ruta_fija_mapa, f"RMA2_acum_{date_ini:%Y%m%d_%H%M}.nc")
-    with nc.Dataset(file_out, 'w', format='NETCDF4') as rootgrp:
-        rootgrp.createDimension('time', None)
-        rootgrp.createDimension('y', mapa_acumulado.shape[0])
-        rootgrp.createDimension('x', mapa_acumulado.shape[1])
-        variables_acum = rootgrp.createVariable('acumulacion', 'f4', ('y', 'x'), zlib=True)
-        variables_acum[:, :] = mapa_acumulado
-        rootgrp.timestamp = date_ini.strftime('%Y-%m-%d %H:%M:%S')
-        
-    print(f"📦 ¡Archivo acumulado consolidado en ruta oficial!: {file_out}")
-    return file_out, True
+def crear_netcdf_acum(files, path_output, date_file_ini, date_file_fin,
+                      date_acum_ini, date_acum_fin,
+                      radar_lat, radar_lon, radar, min_acum=1, path_statics=Path('/data/mrugna/RQPE/')):
+
+    print('Acumulando y guardando netcdf...')
+
+    if not os.path.exists(path_output):
+        os.system('mkdir '+ path_output)
+
+    date_ini = dt.datetime.strptime(date_file_ini, '%Y%m%d_%H%M')
+    date_fin = dt.datetime.strptime(date_file_fin, '%Y%m%d_%H%M')
+
+    date_acum_ini_str = dt.datetime.strftime(date_acum_ini, '%Y%m%d_%H%M00')
+    date_acum_fin_str = dt.datetime.strftime(date_acum_fin, '%Y%m%d_%H%M00')
+
+    path_archivo_salida = path_output.joinpath(f'RQPE2K_{radar}.{min_acum:02}M.{date_acum_fin_str}.nc')
+    if Path.exists(path_archivo_salida):
+        print(f'{path_archivo_salida} existe.')
+        print('Lo reescribo')#return
+
+    periodo = date_fin - date_ini
+
+    date_list = [date_ini + dt.timedelta(minutes=n) for n in range(0, int((periodo.seconds/60)+1))]
+
+    Acum_1m_d = Acum_1m_doble(files, date_list)
+
+    date_ini_index = date_list.index(date_acum_ini)
+    date_fin_index = date_list.index(date_acum_fin)
+
+    Acum_1m_d = Acum_1m_d[date_ini_index:date_fin_index, :, :]
+
+    med = Acum_1m_d.shape[0]/float(min_acum)
+
+    if not med.is_integer():
+        raise ValueError("Los minutos totales debe ser divisible por el tiempo de acumulado")
+
+    Acum_d = np.sum(np.reshape(Acum_1m_d, [int(med), min_acum, Acum_1m_d.shape[1], Acum_1m_d.shape[2]]), axis=1)
+
+    periodo = date_acum_fin - date_acum_ini
+
+    date_list = [date_acum_ini + dt.timedelta(minutes=n*min_acum) for n in range(1, int((periodo.seconds/(60*min_acum))+1))]
+    with Dataset(path_statics.joinpath(f'{radar}_RQPE2K.STATIC.nc'), 'r') as nc_qpe:
+        lat = np.squeeze(nc_qpe.variables['lat'][:])
+        lon = np.squeeze(nc_qpe.variables['lon'][:])
+
+    Acum_d[Acum_d < 0.01] = 0.
+    Acum_d = remove_corners(Acum_d, lat, lon, radar_lat, radar_lon)
+
+    nc_time_str = dt.datetime.strftime(date_acum_ini, '%Y-%m-%d %H:%M:%S')  # esto es referencia del inicio, no del final
+
+    print(f'Guardo {path_archivo_salida}')
+    with Dataset(path_archivo_salida, mode='w') as ncfile:
+
+        # revisar dimensiones, variables, etc...
+        x_dim = ncfile.createDimension('x', int(lat.shape[0]))     # latitude axis
+        y_dim = ncfile.createDimension('y', int(lat.shape[1]))    # longitude axis
+        time_dim = ncfile.createDimension('time', None) # unlimited axis (can be appended to)
+
+        #ncfile.title = date_acum_ini_str + '_to_' + date_acum_fin_str
+        #ncfile.subtitle = 'Acumulados cada '+'{:02}'.format(min_acum)+' minutos'
+        ncfile.TITLE = 'Radar Quantitative Precipitation Estimation'
+        ncfile.INSTITUTION = 'Servicio Meteorologico Nacional'
+        ncfile.START_DATE = dt.datetime.strftime(date_acum_ini, '%Y-%m-%d %H:%M:%S')
+        ncfile.VALID_DATE = dt.datetime.strftime(date_acum_fin, '%Y-%m-%d %H:%M:%S') # ???
+        ncfile.Conventions = 'CF-1.8'
+        ncfile.FREQ = '10M'
+        ncfile.MAP_PROJ = f'+proj=eqc +lat_ts=0 +lat_0={radar_lat} +lon_0={radar_lon} +x_0=0 +y_0=0 +ellps=WGS84 +units=m'
+        ncfile.DX = 2000.
+        ncfile.DY = 2000.
+
+        # REVISAR: esto puede que tenga que cambiar tambien para ser el final y no el inicio
+        time = ncfile.createVariable('time', np.float64, ('time',))
+        time.units = 'minutes since ' + nc_time_str
+        time.long_name = 'minutes since ' + nc_time_str
+
+        times = date2num(date_list, time.units)
+
+        pp10M = ncfile.createVariable('pp10M', np.float64, ('time','y','x')) # note: unlimited dimension is leftmost
+        pp10M.units = 'mm' 
+        pp10M.standard_name = 'lwe_thickness_of_precipitation_amount' # this is a CF standard name
+        pp10M.long_name = 'Accumulated Total Precipitation in 10M'
+        pp10M.coordinates = 'lat lon'
+        # pp10M._FillValue = -9999.
+
+        x_var = ncfile.createVariable('x', np.float64, ('x',))
+        x_var.standard_name = 'longitude'
+        x_var.long_name = 'longitude'
+
+        y_var = ncfile.createVariable('y', np.float64, ('y',))
+        y_var.standard_name = 'latitude'
+        y_var.long_name = 'latitude'
+
+        time[:] = times
+        x_var[:] = lon[0, :]
+        y_var[:] = lat[:, 0]
+        pp10M[:] = Acum_d
+
+    return 
+
 
 def _add_qpe_to_radar_object(field, radar, field_name='qpe', units='mm/h', 
                               long_name='Rain_rate', standard_name='Rain_rate',

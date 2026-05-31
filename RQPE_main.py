@@ -82,7 +82,7 @@ if uso_netcdf:
     pero por ahora solo busca netcdf. Hay que reciclar la funcion que arma el
     objeto radar con los H5.
     """
-    date_file_ini, date_file_fin = Proc.Files_ini_fin(date_ini, date_fin, path_files,radar)
+    date_file_ini, date_file_fin = Proc.Files_ini_fin(date_ini, date_fin, path_files)
     #print(date_file_fin)
     #print(config['path_archivos'])
     """
@@ -91,7 +91,7 @@ if uso_netcdf:
     - El tema acá es que hay que levantar una excepción cuando hay muchos archivos
     faltantes dentro de la ventana que uno pide.
     """
-    files = Proc.Archivos_rma(date_file_ini, date_file_fin, path_files,radar)
+    files = Proc.Archivos_rma(date_file_ini, date_file_fin, path_files)
 else:
     files = Proc.lista_archivos_zh(date_ini, date_fin, path_files, radar, uso_netcdf)
 

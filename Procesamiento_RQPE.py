@@ -108,12 +108,12 @@ def armo_cfradial_base(file_zh, path_output_red):
 
 ##############################################################################
 
-"""
-def Files_ini_fin(date_ini, date_fin, path_files, radar):
-  
-   # Esta funcion busca los archivos en path_files que están dentro del rango horario pedido.
 
-    
+def Files_ini_fin(date_ini, date_fin, path_files, radar):
+    """
+    Esta funcion busca los archivos en path_files que están dentro del rango horario pedido.
+
+    """
 
     date_ini_str = dt.datetime.strftime(date_ini - dt.timedelta(minutes=1), '%Y%m%d_%H%M')
     file_ini = glob.glob(f'{path_files}/cfrad.{date_ini:s%Y%m%d_%H%M}*{radar}*_0*.nc')
@@ -175,21 +175,6 @@ def Archivos_rma(date_file_ini, date_file_fin, path_files, radar):
         files = files + g
 
     return files
-"""
-def Files_ini_fin(date_ini, date_fin, path_files, radar):
-    import glob, os
-    archivos_ordenados = sorted(glob.glob(os.path.join(path_files, "*.nc")))
-    if not archivos_ordenados:
-        raise FileNotFoundError(f"No hay archivos NetCDF en {path_files}")
-    file_ini = archivos_ordenados[0]
-    file_fin = archivos_ordenados[-1]
-    print(f"📊 Secuencia Detectada: {len(archivos_ordenados)} archivos listos para procesar.")
-    return file_ini, file_fin
-
-def Archivos_rma(date_file_ini, date_file_fin, path_files, radar):
-    import glob, os
-    archivos_ordenados = sorted(glob.glob(os.path.join(path_files, "*.nc")))
-    return archivos_ordenados
 
 
 def Reducir_cfradial(file, path_output, radar, overwrite=False):
@@ -202,8 +187,7 @@ def Reducir_cfradial(file, path_output, radar, overwrite=False):
     file_out = path_output.joinpath(f'{radar}/{file_str[:-3]}_red.nc')#path_output+file_str[:-3]+'_red.nc'
 
     if not os.path.exists(path_output):
-      #  os.system('mkdir '+path_output)
-        os.system('mkdir ' + str(path_output))
+        os.system('mkdir '+path_output)
 
     time = file_str[6:14]
 
@@ -386,7 +370,7 @@ def echotop2(radar, radar_new):
 
     return radar_new
 
-"""
+
 def QC_zh_phidp(file_red, path_output_qc, radar, overwrite=False):
     import QC_RQPE
 
@@ -432,66 +416,7 @@ def QC_zh_phidp(file_red, path_output_qc, radar, overwrite=False):
         return file, True
 
     return file, True
-"""
 
-def QC_zh_phidp(file_input_red, path_output_qc, *args, **kwargs):
-    """
-    Control de Calidad adaptado. Normaliza de forma absoluta los diccionarios 
-    de tiempo para evitar la incompatibilidad estructural entre NumPy y cftime.
-    """
-    import pyart
-    import os
-    import numpy as np
-    import datetime as dt
-    
-    nombre_base = os.path.basename(file_input_red)
-    file_out = os.path.join(path_output_qc, nombre_base.replace('_red.nc', '_qc.nc'))
-    
-    # Asegurar carpetas
-    os.makedirs(os.path.dirname(file_out), exist_ok=True)
-    
-    # 1. Leer el volumen reducido
-    radar_obj = pyart.io.read(file_input_red)
-    
-    # --- SUPER PARCHE DE TIEMPOS ULTRA-ROBUSTO ---
-    try:
-        # Aplanamos el array de datos de tiempo a float64 plano sin máscaras
-        if hasattr(radar_obj, 'time') and 'data' in radar_obj.time:
-            datos_tiempo = np.atleast_1d(radar_obj.time['data'])
-            if np.ma.isMaskedArray(datos_tiempo):
-                radar_obj.time['data'] = datos_tiempo.filled(0.0).astype(np.float64)
-            else:
-                radar_obj.time['data'] = np.array(datos_tiempo, dtype=np.float64)
-        
-        # Forzar strings limpios en metadatos temporales para que cftime no intente recalcular tipos complejos
-        if 'units' in radar_obj.time:
-            # Reaseguramos una unidad estándar plana
-            radar_obj.time['units'] = str(radar_obj.time['units'])
-            
-        # Si existen las variables de texto con objetos datetime corruptos, las pisamos con strings ISO
-        if hasattr(radar_obj, 'metadata'):
-            if 'start_time' in radar_obj.metadata:
-                radar_obj.metadata['start_time'] = str(radar_obj.metadata['start_time'])
-            if 'end_time' in radar_obj.metadata:
-                radar_obj.metadata['end_time'] = str(radar_obj.metadata['end_time'])
-    except Exception as e:
-        print(f"⚠️ Nota en normalización de tiempos: {e}")
-    # ----------------------------------------------
-
-    # Asegurar variables base para evitar fallos en módulos de grillado o QPE
-    if 'DBZH_nomask' not in radar_obj.fields:
-        radar_obj.add_field_like('DBZH', 'DBZH_nomask', radar_obj.fields['DBZH']['data'].copy(), replace_existing=True)
-        
-    if 'KDP' not in radar_obj.fields:
-        radar_obj.add_field_like('DBZH', 'KDP', np.zeros_like(radar_obj.fields['DBZH']['data']), replace_existing=True)
-    if 'PHIDP' not in radar_obj.fields:
-        radar_obj.add_field_like('DBZH', 'PHIDP', np.zeros_like(radar_obj.fields['DBZH']['data']), replace_existing=True)
-    
-    # 3. Guardar el archivo de volumen libre de incompatibilidades
-    pyart.io.cfradial.write_cfradial(file_out, radar_obj, format='NETCDF4')
-    print(f"🧼 [QC Exitoso] Archivo guardado y normalizado en: {os.path.basename(file_out)}")
-    
-    return file_out, True
 
 def _det_system_phase(radar):
 

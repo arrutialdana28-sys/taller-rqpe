@@ -128,7 +128,7 @@ def make_QC_PHIDP(radar, sys_phase=0):
 
     return radar, Phidp_mask
 
-"""
+
 def unfold_and_calc_kdp(radar, Phidp_mask, sys_phase=0., min_rhv=0.7):
 
     phidp, kdp = pyart_mod.phase_proc_lp(radar, 0,sys_phase=sys_phase, overide_sys_phase=True, refl_field='DBZH_nomask', 
@@ -153,50 +153,7 @@ def unfold_and_calc_kdp(radar, Phidp_mask, sys_phase=0., min_rhv=0.7):
     radar.fields['corrected_kdp']['data'] = masked_field
 
     return radar
-"""
 
-
-def unfold_and_calc_kdp(radar, Phidp_mask=None, sys_phase=0.0, min_rhv=0.7):
-    """
-    Calcula de forma real y polarimétrica los campos de PHIDP y KDP
-    utilizando el procesador de fase lineal nativo de Py-ART.
-    """
-    import pyart
-    import numpy as np
-
-    print("🔮 [Polarimetría] Procesando fase diferencial y calculando Kdp...")
-    
-    # Asegurar nombres de campos estándar
-    refl_field = 'DBZH_nomask' if 'DBZH_nomask' in radar.fields else 'DBZH'
-    rhv_field = 'RHOHV' if 'RHOHV' in radar.fields else 'RH'
-    
-    try:
-        # Motor de programación lineal nativo de Py-ART (usa scipy internamente)
-        kdp_dict, phidp_dict = pyart.correct.phase_proc_lp(
-            radar,
-            0.0,                   # Constante de auto-rebase
-            self_const=60000.0,    # Parámetro de optimización de fase
-            low_z=10.0,            # Umbral mínimo de reflectividad
-            high_z=53.0,           # Umbral máximo de reflectividad
-            min_rhv=min_rhv,       # Filtrado por coeficiente de correlación
-            refl_field=refl_field,
-            rhohv_field=rhv_field
-        )
-        
-        # Inyectar los campos calculados REALES en el objeto radar
-        radar.add_field('KDP', kdp_dict, replace_existing=True)
-        radar.add_field('PHIDP', phidp_dict, replace_existing=True)
-        print("✅ [Física Activa] PHIDP y KDP calculados exitosamente mediante optimización.")
-        
-    except Exception as e:
-        print(f"⚠️ Falló el cálculo polarimétrico: {e}. Aplicando respaldo numérico.")
-        if 'KDP' not in radar.fields:
-            radar.add_field_like(refl_field, 'KDP', np.zeros_like(radar.fields[refl_field]['data']), replace_existing=True)
-        if 'PHIDP' not in radar.fields:
-            radar.add_field_like(refl_field, 'PHIDP', np.zeros_like(radar.fields[refl_field]['data']), replace_existing=True)
-
-    return radar
-    
 def correc_zphi(radar, a, b):
 
     Atenua_espec, Z_correc_zphi = pyart_mod.calculate_attenuation(radar, 0.0, refl_field='DBZH_nomask', ncp_field='RHOHV', rhv_field='RHOHV',
