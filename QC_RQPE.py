@@ -63,24 +63,24 @@ def make_QC_ZH(radar_qc):
     return radar_qc
 """
 def make_QC_ZH(radar_qc):
-    # 1. Obtenemos datos de DBZH
+    # 1. Obtenemos Zh para el proceso
     Zh = radar_qc.fields['DBZH']['data'].copy()
     
-    # 2. Aquí es donde se destruye el objeto original y se crea uno nuevo
-    # que NO tiene tus campos inyectados.
-    radar_qc = _add_zh_to_radar_object(Zh, radar_qc, mask_field='RHOHV')
-    
-    # 3. SOLUCIÓN: Re-inyectamos los campos perdidos antes de intentar leerlos
-    # Recuperamos los datos del objeto original (pasado por referencia) o recreamos
-    # Si 'Echotop' existía en el radar, lo volvemos a poner aquí
-    if 'Echotop' in radar.fields: # Usamos el radar del scope global/padre
-        radar_qc.add_field('Echotop', radar.fields['Echotop'])
-    
-    # Lo mismo para wet_radome
-    if 'wet_radome' not in radar_qc.metadata:
-        radar_qc.metadata['wet_radome'] = radar.metadata.get('wet_radome', 'False')
+    # 2. Guardamos temporalmente el estado de tus campos personalizados
+    # Extraemos 'Echotop' y 'wet_radome' del radar ANTES de que sea procesado
+    temp_echotop = radar_qc.fields.get('Echotop')
+    temp_wet = radar_qc.metadata.get('wet_radome', 'False')
 
-    # 4. Ahora el QC puede leer los campos sin fallar
+    # 3. Llamada original que crea el nuevo objeto radar
+    radar_qc = _add_zh_to_radar_object(Zh, radar_qc, mask_field='RHOHV')
+
+    # 4. RE-INYECTAMOS los campos al NUEVO objeto creado por el QC
+    if temp_echotop is not None:
+        radar_qc.add_field('Echotop', temp_echotop, replace_existing=True)
+    
+    radar_qc.metadata['wet_radome'] = temp_wet
+
+    # Ahora el objeto radar_qc tiene todo lo necesario para las líneas 32 y 34
     echotop = radar_qc.fields['Echotop']['data'][:]
     wet_rad = radar_qc.metadata['wet_radome']
     
