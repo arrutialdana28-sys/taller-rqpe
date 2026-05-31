@@ -93,65 +93,47 @@ def RQPE_simple_doble(file_qc, path_output_qpe, *args, **kwargs):
 
 def Grid_RQPE(file_qpe, path_output_grid, radar,
               resolucion=2, radar_range=240, overwrite=False):
-    """
-    Tu función original intacta:
-    Garantiza que file_qpe se trate como Path para evitar el AttributeError,
-    conservando tu lógica de planchar alturas a 500m y proyección 'eqc'.
-    """
-    import pyart
-    import os
-    import numpy as np
-    from pathlib import Path
 
     print('Grillando RQPE...')
 
-    # Aseguramos el tipo Path para que .stem no falle nunca
-    file_qpe_path = Path(file_qpe)
+    # Aseguramos que sea un objeto Path para que .stem funcione tal cual lo diseñaste
+    from pathlib import Path
+    file_qpe = Path(file_qpe)
 
-    nombre = file_qpe_path.name.replace('_qpe.nc', '').replace('.nc', '')
+    nombre = file_qpe.stem[:-4] # Tu lógica original exacta
     nombre_radar = radar
 
-    # TU nombre de salida original exacto
     file = Path(f'{path_output_grid}/{nombre}_gr.nc')
 
-    # Chequeo de existencia original
-    if file.exists() and not overwrite:
+    # chequeo si el archivo ya se generó para otro tiempo
+    if file.exists():
         print(f'{file} existe.')
         return file, False
 
-    # pyart requiere el string de la ruta
-    radar_obj = pyart.io.read(str(file_qpe_path))
-    radar_obj = radar_obj.extract_sweeps([1])
+    # pyart requiere el string del path
+    radar_obj = pyart.io.read(str(file_qpe))
 
-    radar_range = radar_range + 50  
-    puntos = (radar_range / resolucion) * 2 + 1
+    radar_range = radar_range + 50  # agrego 50 km a la matriz por las dudas
+    puntos = (radar_range/resolucion)*2+1
 
     if not puntos.is_integer():
         raise ValueError("Rango no divisible por la resolucion")
 
-    # TU HACK FÍSICO ORIGINAL: Planchar alturas a 500m
+    # TU TRUCO FÍSICO ORIGINAL: Planchar alturas a 500m
     A = radar_obj.gate_altitude['data']
-    radar_obj.gate_altitude['data'] = np.ones_like(A) * 500
+    radar_obj.gate_altitude['data'] = np.ones_like(A)*500
 
-    # Tu grillado original por vecino más cercano en proyección EQC
-    grid = pyart.map.grid_from_radars(
-        (radar_obj,), 
-        grid_shape=(1, int(puntos), int(puntos)),
-        grid_limits=((500, 500), (-1000 * radar_range, 1000 * radar_range), (-1000 * radar_range, 1000 * radar_range)),
-        map_roi=False,
-        grid_projection={'proj': 'eqc', 'lat_0': radar_obj.latitude['data'][0], 'lon_0': radar_obj.longitude['data'][0]},
-        weighting_function='Nearest', 
-        min_radius=1000.0,
-        gridding_algo='map_gates_to_grid', 
-        fields=["rain_rate"]
-    )
+    # Tu grillado original intacto en proyección Equidistante Cilíndrica ('eqc')
+    grid = pyart.map.grid_from_radars((radar_obj,), grid_shape=(1, int(puntos), int(puntos)),
+                                      grid_limits=((500, 500), (-1000*radar_range, 1000*radar_range), (-1000*radar_range, 1000*radar_range)),
+                                      map_roi=False,
+                                      grid_projection = {'proj': 'eqc', 'lat_0': radar_obj.latitude['data'][0], 'lon_0': radar_obj.longitude['data'][0]},
+                                      weighting_function = 'Nearest', min_radius=1000.0,
+                                      gridding_algo='map_gates_to_grid', fields=["rain_rate"])
 
-    # Escritura original con tus variables de puntos x, y, z, lat, lon
-    pyart.io.write_grid(
-        str(file), grid, format='NETCDF4', write_proj_coord_sys=True,
-        proj_coord_sys=None, arm_time_variables=False, arm_alt_lat_lon_variables=False,
-        write_point_x_y_z=True, write_point_lon_lat_alt=True
-    )
+    pyart.io.write_grid(str(file), grid, format='NETCDF4', write_proj_coord_sys=True,
+                        proj_coord_sys=None, arm_time_variables=False, arm_alt_lat_lon_variables=False,
+                        write_point_x_y_z=True, write_point_lon_lat_alt=True)
 
     return file, True
                   
