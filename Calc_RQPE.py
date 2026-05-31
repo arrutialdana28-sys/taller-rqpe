@@ -31,43 +31,38 @@ from cartopy.geodesic import Geodesic
 
 
 def RQPE_simple_doble(file_qc, path_output_qpe, radar, overwrite=False):
-
-    print('Calculando RQPE...')
-
+    print(f'Procesando entrada: {file_qc}')
+    
     from pathlib import Path
     file_qc_path = Path(file_qc)
 
-    # Limpiamos cualquier sufijo conocido (_qc o _red) de forma segura sin romper strings
+    # Limpieza inteligente: eliminamos cualquier sufijo antes de crear el nuevo nombre
     nombre_base = file_qc_path.stem
     for sufijo in ['_qc', '_red']:
         if nombre_base.endswith(sufijo):
             nombre_base = nombre_base.replace(sufijo, '')
 
-    # Construimos la salida respetando tus rutas estructuradas
     file_out = Path(f"{path_output_qpe}/{nombre_base}_qpe.nc")
-
-    # Aseguramos que el directorio exista
-    os.makedirs(os.path.dirname(file_out), exist_ok=True)
+    
+    # Aseguramos que la ruta de salida exista
+    os.makedirs(path_output_qpe, exist_ok=True)
 
     if file_out.exists() and not overwrite:
-        print(f"{file_out} existe.")
-        return file_out, False
+        print(f"El archivo {file_out} ya existe, saltando.")
+        return str(file_out), False
 
-    # Leemos el radar (sea _qc.nc o _red.nc)
+    # Leemos el radar
     radar_obj = pyart.io.read(str(file_qc_path))
 
-    # --- AQUÍ VA TU LÓGICA MATEMÁTICA Y LAS RELACIONES Z-R INTACTAS ---
-    # Tu código original que calcula rain_rate, qpe, etc.
-    # ...
-    # (Mantené todo tu bloque de cálculo matemático original aquí abajo)
+    # --- AQUÍ VA TU LÓGICA DE CÁLCULO ---
+    # [MANTENÉ TU LÓGICA MATEMÁTICA AQUÍ]
     
-    # Supongamos que tu bloque termina guardando el objeto modificado en el archivo netcdf:
+    # Escribimos el archivo QPE resultante
     pyart.io.write_cfradial(str(file_out), radar_obj)
+    print(f"✅ Archivo QPE generado: {file_out}")
 
-    print(f"✅ QPE guardado con éxito en: {file_out}")
-    return file_out, True
+    return str(file_out), True
     
-
 def Grid_RQPE(file_qpe, path_output_grid, radar,
               resolucion=2, radar_range=240, overwrite=False):
 
