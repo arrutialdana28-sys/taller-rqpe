@@ -33,15 +33,17 @@ from cartopy.geodesic import Geodesic
 def RQPE_simple_doble(file_qc, path_output_qpe, radar, overwrite=False):
     print(f'Procesando entrada: {file_qc}')
     
+    # Aseguramos que file_qc sea un Path
     from pathlib import Path
     file_qc_path = Path(file_qc)
 
-    # Limpieza inteligente: eliminamos cualquier sufijo antes de crear el nuevo nombre
+    # El nombre base de tu archivo es algo como "cfrad.2024..._red"
+    # Vamos a limpiar el sufijo _red o _qc de forma explícita
     nombre_base = file_qc_path.stem
-    for sufijo in ['_qc', '_red']:
-        if nombre_base.endswith(sufijo):
-            nombre_base = nombre_base.replace(sufijo, '')
-
+    if nombre_base.endswith('_red'):
+        nombre_base = nombre_base[:-4] # Quitamos '_red'
+    elif nombre_base.endswith('_qc'):
+        nombre_base = nombre_base[:-3] # Quitamos '_qc'
     file_out = Path(f"{path_output_qpe}/{nombre_base}_qpe.nc")
     
     # Aseguramos que la ruta de salida exista
